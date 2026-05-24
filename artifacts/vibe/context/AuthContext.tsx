@@ -66,13 +66,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = async () => {
+    setSession(null);
+    setUser(null);
+    setProfile(null);
     await supabase.auth.signOut();
   };
 
   return (
-    <AuthContext.Provider
-      value={{ session, user, profile, loading, signOut, refreshProfile }}
-    >
+    <AuthContext.Provider value={{ session, user, profile, loading, signOut, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

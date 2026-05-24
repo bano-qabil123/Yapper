@@ -9,6 +9,7 @@ import {
   Image,
   ActivityIndicator,
   Platform,
+  ScrollView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
@@ -18,52 +19,97 @@ import { useColors } from "@/hooks/useColors";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { GifPicker } from "@/components/GifPicker";
+
+type MediaItem = {
+  uri: string;
+  base64?: string | null;
+  isGif?: boolean;
+  gifUrl?: string;
+};
 
 export default function CreateScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { user, profile } = useAuth();
   const [content, setContent] = useState("");
-  const [mediaUri, setMediaUri] = useState<string | null>(null);
-  const [mediaBase64, setMediaBase64] = useState<string | null>(null);
+  const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [posting, setPosting] = useState(false);
+  const [showGifPicker, setShowGifPicker] = useState(false);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
-  const pickImage = async () => {
+  const MAX_CHARS = 500;
+  const charCount = content.length;
+  const overLimit = charCount > MAX_CHARS;
+  const canPost = (content.trim().length > 0 || mediaItems.length > 0) && !overLimit;
+
+  const pickImages = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
+      allowsMultipleSelection: true,
       quality: 0.8,
       base64: true,
+      selectionLimit: 4,
     });
-    if (!result.canceled && result.assets[0]) {
-      setMediaUri(result.assets[0].uri);
-      setMediaBase64(result.assets[0].base64 ?? null);
+    if (!result.canceled && result.assets.length > 0) {
+      const newItems: MediaItem[] = result.assets.map((a) => ({
+        uri: a.uri,
+        base64: a.base64,
+      }));
+      setMediaItems((prev) => [...prev, ...newItems].slice(0, 4));
     }
   };
 
-  const handlePost = async () => {
-    if (!content.trim()) {
-      Alert.alert("Empty post", "Write something first.");
-      return;
+  const removeMedia = (index: number) => {
+    setMediaItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const insertHashtag = () => {
+    setContent((c) => (c.endsWith(" ") || c === "" ? c + "#" : c + " #"));
+  };
+
+  const insertMention = () => {
+    setContent((c) => (c.endsWith(" ") || c === "" ? c + "@" : c + " @"));
+  };
+
+  function decode(base64: string): Uint8Array {
+    const binaryStr = atob(base64);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
     }
+    return bytes;
+  }
+
+  const handlePost = async () => {
+    if (!canPost) return;
     if (!user) return;
     setPosting(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    let media_url: string | null = null;
+    const uploadedUrls: string[] = [];
 
-    if (mediaBase64 && mediaUri) {
-      const ext = mediaUri.split(".").pop() ?? "jpg";
-      const fileName = `${user.id}/${Date.now()}.${ext}`;
-      const contentType = `image/${ext === "jpg" ? "jpeg" : ext}`;
-      const { data, error } = await supabase.storage
-        .from("media")
-        .upload(fileName, decode(mediaBase64), { contentType, upsert: true });
-      if (!error && data) {
-        const { data: urlData } = supabase.storage.from("media").getPublicUrl(fileName);
-        media_url = urlData.publicUrl;
+    for (const item of mediaItems) {
+      if (item.isGif && item.gifUrl) {
+        uploadedUrls.push(item.gifUrl);
+        continue;
+      }
+      if (item.base64 && item.uri) {
+        const ext = item.uri.split(".").pop()?.split("?")[0] ?? "jpg";
+        const safeExt = ext === "jpg" ? "jpeg" : ext;
+        const fileName = `${user.id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+        const contentType = `image/${safeExt}`;
+        const { data, error } = await supabase.storage
+          .from("media")
+          .upload(fileName, decode(item.base64), { contentType, upsert: true });
+        if (!error && data) {
+          const { data: urlData } = supabase.storage.from("media").getPublicUrl(fileName);
+          uploadedUrls.push(urlData.publicUrl);
+        }
       }
     }
+
+    const media_url = uploadedUrls.length > 0 ? uploadedUrls.join(",") : null;
 
     const { error } = await supabase.from("posts").insert({
       user_id: user.id,
@@ -76,24 +122,18 @@ export default function CreateScreen() {
       Alert.alert("Error", error.message);
     } else {
       setContent("");
-      setMediaUri(null);
-      setMediaBase64(null);
+      setMediaItems([]);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert("Posted!", "Your post is live.");
     }
   };
 
-  function decode(base64: string): Uint8Array {
-    const binaryStr = atob(base64);
-    const bytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) {
-      bytes[i] = binaryStr.charCodeAt(i);
-    }
-    return bytes;
-  }
-
-  const charCount = content.length;
-  const maxChars = 500;
-  const overLimit = charCount > maxChars;
+  const charColor =
+    charCount > MAX_CHARS
+      ? colors.destructive
+      : charCount > MAX_CHARS * 0.85
+      ? "#f59e0b"
+      : colors.mutedForeground;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -108,30 +148,25 @@ export default function CreateScreen() {
         ]}
       >
         <Text style={[styles.title, { color: colors.foreground, fontFamily: "DMSans_700Bold" }]}>
-          New post
+          New Post
         </Text>
         <TouchableOpacity
           onPress={handlePost}
-          disabled={posting || overLimit || !content.trim()}
+          disabled={posting || !canPost}
           style={[
             styles.postBtn,
-            {
-              backgroundColor:
-                posting || overLimit || !content.trim() ? colors.secondary : colors.primary,
-            },
+            { backgroundColor: canPost && !posting ? colors.primary : colors.secondary },
           ]}
           activeOpacity={0.85}
         >
           {posting ? (
-            <ActivityIndicator size="small" color={colors.primaryForeground} />
+            <ActivityIndicator size="small" color="#fff" />
           ) : (
             <Text
               style={[
                 styles.postBtnText,
                 {
-                  color: posting || overLimit || !content.trim()
-                    ? colors.mutedForeground
-                    : colors.primaryForeground,
+                  color: canPost ? "#fff" : colors.mutedForeground,
                   fontFamily: "DMSans_600SemiBold",
                 },
               ]}
@@ -172,39 +207,64 @@ export default function CreateScreen() {
           autoFocus
         />
 
-        {mediaUri && (
-          <View style={styles.mediaPreview}>
-            <Image source={{ uri: mediaUri }} style={styles.mediaImage} resizeMode="cover" />
-            <TouchableOpacity
-              style={[styles.removeMedia, { backgroundColor: colors.card }]}
-              onPress={() => {
-                setMediaUri(null);
-                setMediaBase64(null);
-              }}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="close" size={16} color={colors.foreground} />
-            </TouchableOpacity>
-          </View>
+        {mediaItems.length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.mediaPreviews}
+          >
+            {mediaItems.map((item, index) => (
+              <View key={index} style={styles.mediaThumbWrap}>
+                <Image source={{ uri: item.uri }} style={styles.mediaThumb} resizeMode="cover" />
+                <TouchableOpacity
+                  style={[styles.removeBtn, { backgroundColor: "rgba(0,0,0,0.7)" }]}
+                  onPress={() => removeMedia(index)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="close" size={14} color="#fff" />
+                </TouchableOpacity>
+                {item.isGif && (
+                  <View style={styles.gifLabel}>
+                    <Text style={styles.gifLabelText}>GIF</Text>
+                  </View>
+                )}
+              </View>
+            ))}
+          </ScrollView>
         )}
 
-        <View style={styles.footer}>
-          <TouchableOpacity onPress={pickImage} activeOpacity={0.7}>
-            <Feather name="image" size={22} color={colors.mutedForeground} />
-          </TouchableOpacity>
-          <Text
-            style={[
-              styles.charCount,
-              {
-                color: overLimit ? colors.destructive : colors.mutedForeground,
-                fontFamily: "DMSans_400Regular",
-              },
-            ]}
-          >
-            {charCount}/{maxChars}
+        <View style={[styles.toolbar, { borderTopColor: colors.border }]}>
+          <View style={styles.toolbarLeft}>
+            <TouchableOpacity onPress={pickImages} activeOpacity={0.7} style={styles.toolBtn}>
+              <Feather name="image" size={20} color={colors.mutedForeground} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowGifPicker(true)} activeOpacity={0.7} style={styles.toolBtn}>
+              <Text style={[styles.gifBtnText, { color: colors.mutedForeground, fontFamily: "DMSans_700Bold" }]}>
+                GIF
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={insertHashtag} activeOpacity={0.7} style={styles.toolBtn}>
+              <Feather name="hash" size={20} color={colors.mutedForeground} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={insertMention} activeOpacity={0.7} style={styles.toolBtn}>
+              <Feather name="at-sign" size={20} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+          <Text style={[styles.charCount, { color: charColor, fontFamily: "DMSans_400Regular" }]}>
+            {charCount}/{MAX_CHARS}
           </Text>
         </View>
       </KeyboardAwareScrollView>
+
+      <GifPicker
+        visible={showGifPicker}
+        onClose={() => setShowGifPicker(false)}
+        onSelect={(gif) => {
+          setMediaItems((prev) =>
+            [...prev, { uri: gif.preview, isGif: true, gifUrl: gif.url }].slice(0, 4)
+          );
+        }}
+      />
     </View>
   );
 }
@@ -229,7 +289,7 @@ const styles = StyleSheet.create({
   },
   postBtnText: { fontSize: 15 },
   scrollArea: { flex: 1 },
-  scrollContent: { padding: 16, gap: 16 },
+  scrollContent: { padding: 16, gap: 14, paddingBottom: 40 },
   authorRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   avatar: { width: 40, height: 40, borderRadius: 20 },
   avatarPlaceholder: {
@@ -241,23 +301,38 @@ const styles = StyleSheet.create({
   },
   username: { fontSize: 14 },
   input: { fontSize: 17, lineHeight: 25, minHeight: 120 },
-  mediaPreview: { borderRadius: 12, overflow: "hidden", position: "relative" },
-  mediaImage: { width: "100%", height: 200, borderRadius: 12 },
-  removeMedia: {
+  mediaPreviews: { gap: 8, paddingBottom: 4 },
+  mediaThumbWrap: { position: "relative", marginRight: 2 },
+  mediaThumb: { width: 100, height: 100, borderRadius: 8 },
+  removeBtn: {
     position: "absolute",
-    top: 8,
-    right: 8,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    top: 4,
+    right: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     alignItems: "center",
     justifyContent: "center",
   },
-  footer: {
+  gifLabel: {
+    position: "absolute",
+    bottom: 4,
+    left: 4,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  gifLabelText: { color: "#fff", fontSize: 10, fontFamily: "DMSans_700Bold" },
+  toolbar: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingTop: 8,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
+  toolbarLeft: { flexDirection: "row", gap: 4 },
+  toolBtn: { padding: 8 },
+  gifBtnText: { fontSize: 13 },
   charCount: { fontSize: 13 },
 });

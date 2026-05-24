@@ -51,25 +51,29 @@ export default function ProfileScreen() {
       ]);
 
       const pids = (postData ?? []).map((p: Post) => p.id);
-      const [{ data: likes }, { data: likesByUser }, { data: comments }] = await Promise.all([
-        supabase.from("likes").select("post_id").in("post_id", pids),
-        supabase.from("likes").select("post_id").in("post_id", pids).eq("user_id", user.id),
-        supabase.from("comments").select("post_id").in("post_id", pids),
-      ]);
-      const likeCounts: Record<string, number> = {};
-      (likes ?? []).forEach((l: { post_id: string }) => { likeCounts[l.post_id] = (likeCounts[l.post_id] ?? 0) + 1; });
-      const likedSet = new Set((likesByUser ?? []).map((l: { post_id: string }) => l.post_id));
-      const commentCounts: Record<string, number> = {};
-      (comments ?? []).forEach((c: { post_id: string }) => { commentCounts[c.post_id] = (commentCounts[c.post_id] ?? 0) + 1; });
+      if (pids.length > 0) {
+        const [{ data: likes }, { data: likesByUser }, { data: comments }] = await Promise.all([
+          supabase.from("likes").select("post_id").in("post_id", pids),
+          supabase.from("likes").select("post_id").in("post_id", pids).eq("user_id", user.id),
+          supabase.from("comments").select("post_id").in("post_id", pids),
+        ]);
+        const likeCounts: Record<string, number> = {};
+        (likes ?? []).forEach((l: { post_id: string }) => { likeCounts[l.post_id] = (likeCounts[l.post_id] ?? 0) + 1; });
+        const likedSet = new Set((likesByUser ?? []).map((l: { post_id: string }) => l.post_id));
+        const commentCounts: Record<string, number> = {};
+        (comments ?? []).forEach((c: { post_id: string }) => { commentCounts[c.post_id] = (commentCounts[c.post_id] ?? 0) + 1; });
+        setPosts(
+          (postData ?? []).map((p: Post) => ({
+            ...p,
+            likes_count: likeCounts[p.id] ?? 0,
+            comments_count: commentCounts[p.id] ?? 0,
+            is_liked: likedSet.has(p.id),
+          }))
+        );
+      } else {
+        setPosts([]);
+      }
 
-      setPosts(
-        (postData ?? []).map((p: Post) => ({
-          ...p,
-          likes_count: likeCounts[p.id] ?? 0,
-          comments_count: commentCounts[p.id] ?? 0,
-          is_liked: likedSet.has(p.id),
-        }))
-      );
       setFollowerCount(fwrCount ?? 0);
       setFollowingCount(fwingCount ?? 0);
       setLoading(false);
@@ -78,9 +82,7 @@ export default function ProfileScreen() {
     [user]
   );
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const loadFollowers = async () => {
     if (!user) return;
@@ -154,7 +156,7 @@ export default function ProfileScreen() {
           )}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
+              <Text style={[{ color: colors.mutedForeground, fontFamily: "DMSans_400Regular", fontSize: 14 }]}>
                 None yet
               </Text>
             </View>
@@ -173,21 +175,13 @@ export default function ProfileScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              load(true);
-            }}
+            onRefresh={() => { setRefreshing(true); load(true); }}
             tintColor={colors.primary}
           />
         }
         ListHeaderComponent={
           <View>
-            <View
-              style={[
-                styles.header,
-                { paddingTop: topPad + 12, borderBottomColor: colors.border },
-              ]}
-            >
+            <View style={[styles.headerBg, { paddingTop: topPad + 12, backgroundColor: colors.card }]}>
               <View style={styles.headerActions}>
                 <TouchableOpacity
                   onPress={() => router.push("/edit-profile")}
@@ -195,11 +189,11 @@ export default function ProfileScreen() {
                   activeOpacity={0.8}
                 >
                   <Text style={[styles.editBtnText, { color: colors.foreground, fontFamily: "DMSans_500Medium" }]}>
-                    Edit
+                    Edit profile
                   </Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={signOut} activeOpacity={0.7}>
-                  <Feather name="log-out" size={20} color={colors.mutedForeground} />
+                <TouchableOpacity onPress={signOut} activeOpacity={0.7} style={styles.signOutBtn}>
+                  <Feather name="log-out" size={18} color={colors.mutedForeground} />
                 </TouchableOpacity>
               </View>
 
@@ -214,12 +208,21 @@ export default function ProfileScreen() {
               <UserBadge username={profile?.username ?? ""} verified={profile?.verified ?? false} size="lg" />
 
               {profile?.bio && (
-                <Text style={[styles.bio, { color: colors.foreground, fontFamily: "DMSans_400Regular" }]}>
+                <Text style={[styles.bio, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
                   {profile.bio}
                 </Text>
               )}
 
-              <View style={styles.stats}>
+              <View style={[styles.stats, { borderTopColor: colors.border }]}>
+                <View style={styles.stat}>
+                  <Text style={[styles.statNum, { color: colors.foreground, fontFamily: "DMSans_700Bold" }]}>
+                    {posts.length}
+                  </Text>
+                  <Text style={[styles.statLabel, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
+                    Posts
+                  </Text>
+                </View>
+                <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
                 <TouchableOpacity style={styles.stat} onPress={loadFollowers} activeOpacity={0.8}>
                   <Text style={[styles.statNum, { color: colors.foreground, fontFamily: "DMSans_700Bold" }]}>
                     {followerCount}
@@ -237,21 +240,12 @@ export default function ProfileScreen() {
                     Following
                   </Text>
                 </TouchableOpacity>
-                <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
-                <View style={styles.stat}>
-                  <Text style={[styles.statNum, { color: colors.foreground, fontFamily: "DMSans_700Bold" }]}>
-                    {posts.length}
-                  </Text>
-                  <Text style={[styles.statLabel, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
-                    Posts
-                  </Text>
-                </View>
               </View>
             </View>
 
             {posts.length === 0 && !loading && (
               <View style={styles.empty}>
-                <Feather name="edit-3" size={36} color={colors.mutedForeground} />
+                <Feather name="edit-3" size={36} color={colors.border} />
                 <Text style={[styles.emptyTitle, { color: colors.foreground, fontFamily: "DMSans_600SemiBold" }]}>
                   Share something real
                 </Text>
@@ -262,63 +256,61 @@ export default function ProfileScreen() {
             )}
           </View>
         }
-        scrollEnabled={!!posts.length}
+        contentContainerStyle={{ paddingBottom: 100 }}
       />
 
-      <ProfileListModal
-        visible={showFollowers}
-        title="Followers"
-        data={followersList}
-        onClose={() => setShowFollowers(false)}
-      />
-      <ProfileListModal
-        visible={showFollowing}
-        title="Following"
-        data={followingList}
-        onClose={() => setShowFollowing(false)}
-      />
+      <ProfileListModal visible={showFollowers} title="Followers" data={followersList} onClose={() => setShowFollowers(false)} />
+      <ProfileListModal visible={showFollowing} title="Following" data={followingList} onClose={() => setShowFollowing(false)} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
+  headerBg: {
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 0,
     alignItems: "center",
     gap: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   headerActions: {
     flexDirection: "row",
     justifyContent: "flex-end",
     alignItems: "center",
     width: "100%",
-    gap: 14,
+    gap: 12,
+    marginBottom: 4,
   },
   editBtn: {
     paddingHorizontal: 16,
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1,
   },
   editBtnText: { fontSize: 14 },
-  avatar: { width: 80, height: 80, borderRadius: 40, marginTop: 4 },
+  signOutBtn: { padding: 4 },
+  avatar: { width: 80, height: 80, borderRadius: 40 },
   avatarPlaceholder: {
     width: 80,
     height: 80,
     borderRadius: 40,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 4,
   },
-  bio: { fontSize: 14, textAlign: "center", lineHeight: 20, maxWidth: "85%" },
-  stats: { flexDirection: "row", alignItems: "center", gap: 0 },
-  stat: { alignItems: "center", paddingHorizontal: 24, gap: 2 },
-  statNum: { fontSize: 18 },
+  bio: { fontSize: 14, textAlign: "center", lineHeight: 20, maxWidth: "90%", paddingBottom: 4 },
+  stats: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: "100%",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: 8,
+    paddingTop: 16,
+    paddingBottom: 16,
+  },
+  stat: { flex: 1, alignItems: "center", gap: 2 },
+  statNum: { fontSize: 20 },
   statLabel: { fontSize: 12 },
-  statDivider: { width: 1, height: 30 },
+  statDivider: { width: 1, height: 28 },
   modalContainer: { flex: 1 },
   modalHeader: {
     flexDirection: "row",

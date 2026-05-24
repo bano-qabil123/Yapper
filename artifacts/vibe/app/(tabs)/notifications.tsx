@@ -15,6 +15,7 @@ import { useRouter } from "expo-router";
 import { useColors } from "@/hooks/useColors";
 import { supabase, Notification } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
+import { useNotificationBadge } from "@/context/NotificationBadgeContext";
 import { UserBadge } from "@/components/UserBadge";
 
 function timeAgo(dateStr: string): string {
@@ -22,17 +23,17 @@ function timeAgo(dateStr: string): string {
   const diff = now - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "now";
-  if (mins < 60) return `${mins}m`;
+  if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
+  if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
-  return `${days}d`;
+  return `${days}d ago`;
 }
 
-function NotifIcon({ type, color }: { type: string; color: string }) {
-  if (type === "follow") return <Ionicons name="person-add" size={16} color={color} />;
-  if (type === "comment") return <Feather name="message-circle" size={16} color={color} />;
-  if (type === "like") return <Ionicons name="heart" size={16} color="#ff453a" />;
+function NotifIcon({ type }: { type: string }) {
+  if (type === "follow") return <Ionicons name="person-add" size={14} color="#7c5cfc" />;
+  if (type === "comment") return <Feather name="message-circle" size={14} color="#7c5cfc" />;
+  if (type === "like") return <Ionicons name="heart" size={14} color="#ff453a" />;
   return null;
 }
 
@@ -41,6 +42,7 @@ export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
+  const { markAllRead } = useNotificationBadge();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -64,10 +66,11 @@ export default function NotificationsScreen() {
         const unread = data.filter((n: Notification) => !n.read).map((n: Notification) => n.id);
         if (unread.length > 0) {
           await supabase.from("notifications").update({ read: true }).in("id", unread);
+          markAllRead();
         }
       }
     },
-    [user]
+    [user, markAllRead]
   );
 
   useEffect(() => {
@@ -95,7 +98,7 @@ export default function NotificationsScreen() {
         style={[
           styles.row,
           {
-            backgroundColor: item.read ? "transparent" : colors.primary + "10",
+            backgroundColor: item.read ? "transparent" : colors.primary + "12",
             borderBottomColor: colors.border,
           },
         ]}
@@ -110,8 +113,8 @@ export default function NotificationsScreen() {
               <Ionicons name="person" size={18} color={colors.mutedForeground} />
             </View>
           )}
-          <View style={[styles.badge, { backgroundColor: colors.card }]}>
-            <NotifIcon type={item.type} color={colors.primary} />
+          <View style={[styles.badge, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}>
+            <NotifIcon type={item.type} />
           </View>
         </View>
 
@@ -120,9 +123,6 @@ export default function NotificationsScreen() {
             <Text style={{ fontFamily: "DMSans_600SemiBold" }}>
               {item.profiles?.username ?? "someone"}
             </Text>{" "}
-            {item.profiles?.verified && (
-              <Ionicons name="checkmark-circle" size={13} color={colors.primary} />
-            )}{" "}
             {label}
           </Text>
           {item.posts?.content && (
@@ -133,11 +133,10 @@ export default function NotificationsScreen() {
               {item.posts.content}
             </Text>
           )}
+          <Text style={[styles.time, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
+            {timeAgo(item.created_at)}
+          </Text>
         </View>
-
-        <Text style={[styles.time, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
-          {timeAgo(item.created_at)}
-        </Text>
       </TouchableOpacity>
     );
   };
@@ -170,18 +169,19 @@ export default function NotificationsScreen() {
           />
         }
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Feather name="bell" size={40} color={colors.mutedForeground} />
-            <Text style={[styles.emptyTitle, { color: colors.foreground, fontFamily: "DMSans_600SemiBold" }]}>
-              All caught up
-            </Text>
-            <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
-              When someone follows you or engages with your posts, it'll show up here.
-            </Text>
-          </View>
+          !loading ? (
+            <View style={styles.empty}>
+              <Feather name="bell" size={40} color={colors.border} />
+              <Text style={[styles.emptyTitle, { color: colors.foreground, fontFamily: "DMSans_600SemiBold" }]}>
+                All caught up
+              </Text>
+              <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
+                When someone follows or engages with your posts, it'll show up here.
+              </Text>
+            </View>
+          ) : null
         }
-        contentContainerStyle={notifications.length === 0 ? styles.emptyContainer : undefined}
-        scrollEnabled={!!notifications.length}
+        contentContainerStyle={notifications.length === 0 ? styles.emptyContainer : { paddingBottom: 100 }}
       />
     </View>
   );
@@ -191,15 +191,15 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: {
     paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   title: { fontSize: 22 },
   row: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 12,
   },
@@ -222,7 +222,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  content: { flex: 1, gap: 2 },
+  content: { flex: 1, gap: 3 },
   text: { fontSize: 14, lineHeight: 20 },
   postPreview: { fontSize: 13 },
   time: { fontSize: 12 },

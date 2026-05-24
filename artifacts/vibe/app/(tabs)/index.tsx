@@ -7,6 +7,7 @@ import {
   StyleSheet,
   RefreshControl,
   Platform,
+  StatusBar,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
@@ -37,21 +38,20 @@ async function fetchPosts(tab: Tab, userId: string): Promise<Post[]> {
   const { data, error } = await query;
   if (error || !data) return [];
 
+  if (data.length === 0) return [];
+
   const postIds = data.map((p: Post) => p.id);
-  const [{ data: likes }, { data: likesByUser }] = await Promise.all([
+  const [{ data: likes }, { data: likesByUser }, { data: comments }] = await Promise.all([
     supabase.from("likes").select("post_id").in("post_id", postIds),
     supabase.from("likes").select("post_id").in("post_id", postIds).eq("user_id", userId),
+    supabase.from("comments").select("post_id").in("post_id", postIds),
   ]);
+
   const likeCounts: Record<string, number> = {};
   (likes ?? []).forEach((l: { post_id: string }) => {
     likeCounts[l.post_id] = (likeCounts[l.post_id] ?? 0) + 1;
   });
   const likedSet = new Set((likesByUser ?? []).map((l: { post_id: string }) => l.post_id));
-
-  const { data: comments } = await supabase
-    .from("comments")
-    .select("post_id")
-    .in("post_id", postIds);
   const commentCounts: Record<string, number> = {};
   (comments ?? []).forEach((c: { post_id: string }) => {
     commentCounts[c.post_id] = (commentCounts[c.post_id] ?? 0) + 1;
@@ -76,12 +76,20 @@ export default function HomeScreen() {
 
   const load = useCallback(
     async (silent = false) => {
-      if (!user) return;
+      if (!user) {
+        setLoading(false);
+        return;
+      }
       if (!silent) setLoading(true);
-      const data = await fetchPosts(activeTab, user.id);
-      setPosts(data);
-      setLoading(false);
-      setRefreshing(false);
+      try {
+        const data = await fetchPosts(activeTab, user.id);
+        setPosts(data);
+      } catch {
+        setPosts([]);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
     },
     [activeTab, user]
   );
@@ -94,11 +102,7 @@ export default function HomeScreen() {
     setPosts((prev) =>
       prev.map((p) =>
         p.id === postId
-          ? {
-              ...p,
-              is_liked: liked,
-              likes_count: (p.likes_count ?? 0) + (liked ? 1 : -1),
-            }
+          ? { ...p, is_liked: liked, likes_count: (p.likes_count ?? 0) + (liked ? 1 : -1) }
           : p
       )
     );
@@ -108,11 +112,12 @@ export default function HomeScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
       <View
         style={[
           styles.header,
           {
-            paddingTop: topPad + 12,
+            paddingTop: topPad + 10,
             backgroundColor: colors.background,
             borderBottomColor: colors.border,
           },
@@ -121,27 +126,29 @@ export default function HomeScreen() {
         <Text style={[styles.wordmark, { color: colors.primary, fontFamily: "DMSans_700Bold" }]}>
           vibe
         </Text>
-        <View style={[styles.tabs, { backgroundColor: colors.secondary }]}>
+        <View style={styles.pillRow}>
           {(["all", "following"] as Tab[]).map((t) => (
             <TouchableOpacity
               key={t}
               onPress={() => setActiveTab(t)}
               style={[
-                styles.tabBtn,
-                activeTab === t && { backgroundColor: colors.card },
+                styles.pill,
+                activeTab === t
+                  ? { backgroundColor: colors.primary }
+                  : { backgroundColor: colors.secondary },
               ]}
               activeOpacity={0.8}
             >
               <Text
                 style={[
-                  styles.tabText,
+                  styles.pillText,
                   {
-                    color: activeTab === t ? colors.foreground : colors.mutedForeground,
+                    color: activeTab === t ? "#fff" : colors.mutedForeground,
                     fontFamily: activeTab === t ? "DMSans_600SemiBold" : "DMSans_400Regular",
                   },
                 ]}
               >
-                {t === "all" ? "All" : "Following"}
+                {t === "all" ? "All Feed" : "Following"}
               </Text>
             </TouchableOpacity>
           ))}
@@ -174,15 +181,16 @@ export default function HomeScreen() {
           ListEmptyComponent={
             <View style={styles.empty}>
               <Text style={[styles.emptyTitle, { color: colors.foreground, fontFamily: "DMSans_600SemiBold" }]}>
-                {activeTab === "following" ? "Follow people to see their posts" : "Nothing here yet"}
+                {activeTab === "following" ? "Follow people to see their posts" : "No posts yet"}
               </Text>
               <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
-                {activeTab === "following" ? "Find interesting people in Search" : "Be the first to post something real"}
+                {activeTab === "following"
+                  ? "Find interesting people in Search"
+                  : "Be the first to post something real"}
               </Text>
             </View>
           }
-          contentContainerStyle={posts.length === 0 ? styles.emptyContainer : undefined}
-          scrollEnabled={!!posts.length}
+          contentContainerStyle={posts.length === 0 ? styles.emptyContainer : { paddingBottom: 100 }}
         />
       )}
     </View>
@@ -196,23 +204,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 10,
+    gap: 12,
   },
-  wordmark: { fontSize: 28, letterSpacing: -1 },
-  tabs: {
-    flexDirection: "row",
-    borderRadius: 10,
-    padding: 3,
-    width: "100%",
-    maxWidth: 280,
-  },
-  tabBtn: {
-    flex: 1,
+  wordmark: { fontSize: 26, letterSpacing: -1 },
+  pillRow: { flexDirection: "row", gap: 8 },
+  pill: {
+    paddingHorizontal: 18,
     paddingVertical: 7,
-    borderRadius: 8,
-    alignItems: "center",
+    borderRadius: 20,
   },
-  tabText: { fontSize: 14 },
+  pillText: { fontSize: 14 },
   empty: { padding: 40, alignItems: "center", gap: 8 },
   emptyContainer: { flexGrow: 1, justifyContent: "center" },
   emptyTitle: { fontSize: 16, textAlign: "center" },

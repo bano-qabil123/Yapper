@@ -4,6 +4,7 @@ import {
   Text,
   TextInput,
   FlatList,
+  ScrollView,
   StyleSheet,
   TouchableOpacity,
   Image,
@@ -31,6 +32,34 @@ export default function SearchScreen() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [users, setUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(false);
+  const [trendingHashtags, setTrendingHashtags] = useState<string[]>([]);
+  const [inputFocused, setInputFocused] = useState(false);
+
+  useEffect(() => {
+    loadTrendingHashtags();
+  }, []);
+
+  const loadTrendingHashtags = async () => {
+    const { data } = await supabase
+      .from("posts")
+      .select("content")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (!data) return;
+    const counts: Record<string, number> = {};
+    data.forEach(({ content }: { content: string }) => {
+      const matches = content.match(/#\w+/g) ?? [];
+      matches.forEach((tag: string) => {
+        const t = tag.toLowerCase();
+        counts[t] = (counts[t] ?? 0) + 1;
+      });
+    });
+    const sorted = Object.entries(counts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5)
+      .map(([tag]) => tag);
+    setTrendingHashtags(sorted);
+  };
 
   const doSearch = useCallback(
     async (q: string) => {
@@ -41,7 +70,6 @@ export default function SearchScreen() {
       }
       setLoading(true);
       const trimmed = q.trim();
-
       const [{ data: postData }, { data: userData }] = await Promise.all([
         supabase
           .from("posts")
@@ -58,24 +86,27 @@ export default function SearchScreen() {
 
       if (postData && user) {
         const postIds = postData.map((p: Post) => p.id);
-        const [{ data: likes }, { data: likesByUser }] = await Promise.all([
-          supabase.from("likes").select("post_id").in("post_id", postIds),
-          supabase.from("likes").select("post_id").in("post_id", postIds).eq("user_id", user.id),
-        ]);
-        const likeCounts: Record<string, number> = {};
-        (likes ?? []).forEach((l: { post_id: string }) => {
-          likeCounts[l.post_id] = (likeCounts[l.post_id] ?? 0) + 1;
-        });
-        const likedSet = new Set((likesByUser ?? []).map((l: { post_id: string }) => l.post_id));
-        setPosts(
-          postData.map((p: Post) => ({
-            ...p,
-            likes_count: likeCounts[p.id] ?? 0,
-            is_liked: likedSet.has(p.id),
-          }))
-        );
+        if (postIds.length > 0) {
+          const [{ data: likes }, { data: likesByUser }] = await Promise.all([
+            supabase.from("likes").select("post_id").in("post_id", postIds),
+            supabase.from("likes").select("post_id").in("post_id", postIds).eq("user_id", user.id),
+          ]);
+          const likeCounts: Record<string, number> = {};
+          (likes ?? []).forEach((l: { post_id: string }) => {
+            likeCounts[l.post_id] = (likeCounts[l.post_id] ?? 0) + 1;
+          });
+          const likedSet = new Set((likesByUser ?? []).map((l: { post_id: string }) => l.post_id));
+          setPosts(
+            postData.map((p: Post) => ({
+              ...p,
+              likes_count: likeCounts[p.id] ?? 0,
+              is_liked: likedSet.has(p.id),
+            }))
+          );
+        } else {
+          setPosts([]);
+        }
       }
-
       setUsers((userData ?? []) as Profile[]);
       setLoading(false);
     },
@@ -90,24 +121,36 @@ export default function SearchScreen() {
   }, [params.q]);
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
+  const hasQuery = query.trim().length > 0;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View
         style={[
           styles.header,
-          { paddingTop: topPad + 12, backgroundColor: colors.background, borderBottomColor: colors.border },
+          { paddingTop: topPad + 10, backgroundColor: colors.background, borderBottomColor: colors.border },
         ]}
       >
-        <View style={[styles.searchBar, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
-          <Feather name="search" size={17} color={colors.mutedForeground} />
+        <View
+          style={[
+            styles.searchBar,
+            {
+              backgroundColor: colors.secondary,
+              borderColor: inputFocused ? colors.primary : "transparent",
+              borderWidth: 1,
+            },
+          ]}
+        >
+          <Feather name="search" size={16} color={colors.mutedForeground} />
           <TextInput
             style={[styles.searchInput, { color: colors.foreground, fontFamily: "DMSans_400Regular" }]}
-            placeholder="Search posts and people..."
+            placeholder="Search posts, #hashtags, people..."
             placeholderTextColor={colors.mutedForeground}
             value={query}
             onChangeText={setQuery}
             onSubmitEditing={() => doSearch(query)}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
             returnKeyType="search"
             autoCorrect={false}
           />
@@ -120,49 +163,84 @@ export default function SearchScreen() {
               }}
               activeOpacity={0.7}
             >
-              <Ionicons name="close-circle" size={17} color={colors.mutedForeground} />
+              <Ionicons name="close-circle" size={16} color={colors.mutedForeground} />
             </TouchableOpacity>
           )}
         </View>
 
-        <View style={[styles.tabs, { backgroundColor: colors.secondary }]}>
-          {(["posts", "users"] as SearchTab[]).map((t) => (
-            <TouchableOpacity
-              key={t}
-              onPress={() => setActiveTab(t)}
-              style={[styles.tabBtn, activeTab === t && { backgroundColor: colors.card }]}
-              activeOpacity={0.8}
-            >
-              <Text
-                style={[
-                  styles.tabText,
-                  {
-                    color: activeTab === t ? colors.foreground : colors.mutedForeground,
-                    fontFamily: activeTab === t ? "DMSans_600SemiBold" : "DMSans_400Regular",
-                  },
-                ]}
+        {!hasQuery && trendingHashtags.length > 0 && (
+          <View style={styles.trendingSection}>
+            <Text style={[styles.trendingLabel, { color: colors.mutedForeground, fontFamily: "DMSans_500Medium" }]}>
+              Trending
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pills}>
+              {trendingHashtags.map((tag) => (
+                <TouchableOpacity
+                  key={tag}
+                  onPress={() => {
+                    setQuery(tag);
+                    doSearch(tag);
+                  }}
+                  style={[styles.hashtagPill, { backgroundColor: colors.primary + "22" }]}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[styles.hashtagText, { color: colors.primary, fontFamily: "DMSans_500Medium" }]}>
+                    {tag}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {hasQuery && (
+          <View style={[styles.tabs, { backgroundColor: colors.secondary }]}>
+            {(["posts", "users"] as SearchTab[]).map((t) => (
+              <TouchableOpacity
+                key={t}
+                onPress={() => setActiveTab(t)}
+                style={[styles.tabBtn, activeTab === t && { backgroundColor: colors.primary }]}
+                activeOpacity={0.8}
               >
-                {t === "posts" ? "Posts" : "People"}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+                <Text
+                  style={[
+                    styles.tabText,
+                    {
+                      color: activeTab === t ? "#fff" : colors.mutedForeground,
+                      fontFamily: activeTab === t ? "DMSans_600SemiBold" : "DMSans_400Regular",
+                    },
+                  ]}
+                >
+                  {t === "posts" ? "Posts" : "People"}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
       </View>
 
-      {activeTab === "posts" ? (
+      {!hasQuery ? (
+        <View style={styles.emptyContainer}>
+          <Feather name="search" size={40} color={colors.border} />
+          <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
+            Search for posts, hashtags, or people
+          </Text>
+        </View>
+      ) : activeTab === "posts" ? (
         <FlatList
           data={posts}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => <PostCard post={item} />}
           ListEmptyComponent={
-            <View style={styles.empty}>
-              <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
-                {query ? "No posts found" : "Search for posts, hashtags, or people"}
-              </Text>
-            </View>
+            !loading ? (
+              <View style={styles.empty}>
+                <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
+                  No posts found
+                </Text>
+              </View>
+            ) : null
           }
-          contentContainerStyle={posts.length === 0 ? styles.emptyContainer : undefined}
-          scrollEnabled={!!posts.length}
+          contentContainerStyle={posts.length === 0 ? styles.emptyContainer : { paddingBottom: 100 }}
         />
       ) : (
         <FlatList
@@ -198,14 +276,15 @@ export default function SearchScreen() {
             </TouchableOpacity>
           )}
           ListEmptyComponent={
-            <View style={styles.empty}>
-              <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
-                {query ? "No people found" : "Search for people by username"}
-              </Text>
-            </View>
+            !loading ? (
+              <View style={styles.empty}>
+                <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
+                  No people found
+                </Text>
+              </View>
+            ) : null
           }
-          contentContainerStyle={users.length === 0 ? styles.emptyContainer : undefined}
-          scrollEnabled={!!users.length}
+          contentContainerStyle={users.length === 0 ? styles.emptyContainer : { paddingBottom: 100 }}
         />
       )}
     </View>
@@ -227,9 +306,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 44,
     gap: 8,
-    borderWidth: StyleSheet.hairlineWidth,
   },
   searchInput: { flex: 1, fontSize: 15 },
+  trendingSection: { gap: 8 },
+  trendingLabel: { fontSize: 12, letterSpacing: 0.5, textTransform: "uppercase" },
+  pills: { gap: 8, paddingRight: 4 },
+  hashtagPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  hashtagText: { fontSize: 14 },
   tabs: {
     flexDirection: "row",
     borderRadius: 10,
@@ -261,6 +348,6 @@ const styles = StyleSheet.create({
   userInfo: { flex: 1, gap: 2 },
   bio: { fontSize: 13 },
   empty: { padding: 40, alignItems: "center" },
-  emptyContainer: { flexGrow: 1, justifyContent: "center" },
+  emptyContainer: { flexGrow: 1, justifyContent: "center", alignItems: "center", gap: 12, padding: 40 },
   emptyText: { fontSize: 14, textAlign: "center" },
 });

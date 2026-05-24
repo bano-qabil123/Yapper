@@ -23,6 +23,8 @@ export default function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [emailFocused, setEmailFocused] = useState(false);
+  const [passwordFocused, setPasswordFocused] = useState(false);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -47,13 +49,13 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={[styles.flex, { backgroundColor: colors.background }]}
+      style={[styles.flex, { backgroundColor: "#0a0a0a" }]}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <ScrollView
         contentContainerStyle={[
           styles.container,
-          { paddingTop: insets.top + 60, paddingBottom: insets.bottom + 40 },
+          { paddingTop: insets.top + 72, paddingBottom: insets.bottom + 40 },
         ]}
         keyboardShouldPersistTaps="handled"
       >
@@ -61,7 +63,7 @@ export default function LoginScreen() {
           <Text style={[styles.wordmark, { color: colors.primary, fontFamily: "DMSans_700Bold" }]}>
             vibe
           </Text>
-          <Text style={[styles.tagline, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
+          <Text style={[styles.tagline, { color: "#555", fontFamily: "DMSans_400Regular" }]}>
             share what you actually care about
           </Text>
         </View>
@@ -71,16 +73,18 @@ export default function LoginScreen() {
             style={[
               styles.input,
               {
-                backgroundColor: colors.card,
-                color: colors.foreground,
-                borderColor: colors.border,
+                backgroundColor: "#1a1a1a",
+                color: "#f0f0f0",
+                borderColor: emailFocused ? colors.primary : "transparent",
                 fontFamily: "DMSans_400Regular",
               },
             ]}
             placeholder="Email"
-            placeholderTextColor={colors.mutedForeground}
+            placeholderTextColor="#555"
             value={email}
             onChangeText={setEmail}
+            onFocus={() => setEmailFocused(true)}
+            onBlur={() => setEmailFocused(false)}
             autoCapitalize="none"
             keyboardType="email-address"
             autoCorrect={false}
@@ -89,16 +93,18 @@ export default function LoginScreen() {
             style={[
               styles.input,
               {
-                backgroundColor: colors.card,
-                color: colors.foreground,
-                borderColor: colors.border,
+                backgroundColor: "#1a1a1a",
+                color: "#f0f0f0",
+                borderColor: passwordFocused ? colors.primary : "transparent",
                 fontFamily: "DMSans_400Regular",
               },
             ]}
             placeholder="Password"
-            placeholderTextColor={colors.mutedForeground}
+            placeholderTextColor="#555"
             value={password}
             onChangeText={setPassword}
+            onFocus={() => setPasswordFocused(true)}
+            onBlur={() => setPasswordFocused(false)}
             secureTextEntry
           />
 
@@ -109,23 +115,23 @@ export default function LoginScreen() {
             activeOpacity={0.85}
           >
             {loading ? (
-              <ActivityIndicator color={colors.primaryForeground} />
+              <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={[styles.btnPrimaryText, { color: colors.primaryForeground, fontFamily: "DMSans_600SemiBold" }]}>
+              <Text style={[styles.btnPrimaryText, { color: "#fff", fontFamily: "DMSans_600SemiBold" }]}>
                 Sign in
               </Text>
             )}
           </TouchableOpacity>
 
           <TouchableOpacity onPress={handleForgotPassword} activeOpacity={0.7}>
-            <Text style={[styles.forgotText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
+            <Text style={[styles.forgotText, { color: "#555", fontFamily: "DMSans_400Regular" }]}>
               Forgot password?
             </Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.footer}>
-          <Text style={[styles.footerText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
+          <Text style={[styles.footerText, { color: "#555", fontFamily: "DMSans_400Regular" }]}>
             No account?
           </Text>
           <TouchableOpacity onPress={() => router.push("/(auth)/register")} activeOpacity={0.7}>
@@ -141,17 +147,17 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  container: { paddingHorizontal: 28, gap: 48 },
-  header: { alignItems: "center", gap: 8 },
-  wordmark: { fontSize: 52, letterSpacing: -2 },
-  tagline: { fontSize: 15, textAlign: "center" },
+  container: { paddingHorizontal: 28, gap: 52 },
+  header: { alignItems: "center", gap: 10 },
+  wordmark: { fontSize: 56, letterSpacing: -2 },
+  tagline: { fontSize: 14, textAlign: "center" },
   form: { gap: 12 },
   input: {
     height: 52,
     borderRadius: 12,
     paddingHorizontal: 16,
     fontSize: 16,
-    borderWidth: 1,
+    borderWidth: 1.5,
   },
   btnPrimary: {
     height: 52,
@@ -161,7 +167,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   btnPrimaryText: { fontSize: 16 },
-  forgotText: { fontSize: 14, textAlign: "center", marginTop: 4 },
+  forgotText: { fontSize: 14, textAlign: "center", marginTop: 2 },
   footer: { flexDirection: "row", justifyContent: "center" },
   footerText: { fontSize: 15 },
   linkText: { fontSize: 15 },

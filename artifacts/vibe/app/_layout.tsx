@@ -6,7 +6,7 @@ import {
   useFonts,
 } from "@expo-google-fonts/dm-sans";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Redirect, Stack } from "expo-router";
+import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -15,6 +15,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { NotificationBadgeProvider } from "@/context/NotificationBadgeContext";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -34,12 +35,14 @@ function RootLayoutNav() {
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="post/[id]" />
-      <Stack.Screen name="user/[id]" />
-      <Stack.Screen name="edit-profile" />
-    </Stack>
+    <NotificationBadgeProvider>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="post/[id]" />
+        <Stack.Screen name="user/[id]" />
+        <Stack.Screen name="edit-profile" />
+      </Stack>
+    </NotificationBadgeProvider>
   );
 }
 
