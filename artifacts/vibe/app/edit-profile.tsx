@@ -26,11 +26,13 @@ export default function EditProfileScreen() {
   const router = useRouter();
   const { user, profile, refreshProfile } = useAuth();
 
+  const [displayName, setDisplayName] = useState(profile?.display_name ?? "");
   const [username, setUsername] = useState(profile?.username ?? "");
   const [bio, setBio] = useState(profile?.bio ?? "");
   const [avatarUri, setAvatarUri] = useState<string | null>(profile?.avatar_url ?? null);
   const [avatarBase64, setAvatarBase64] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [focused, setFocused] = useState<string | null>(null);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
 
   const pickAvatar = async () => {
@@ -49,14 +51,9 @@ export default function EditProfileScreen() {
 
   const handleSave = async () => {
     if (!user) return;
-    if (!username.trim()) {
-      Alert.alert("Username required");
-      return;
-    }
-    if (username.includes(" ")) {
-      Alert.alert("Invalid username", "No spaces allowed.");
-      return;
-    }
+    if (!username.trim()) { Alert.alert("Username required"); return; }
+    if (username.includes(" ")) { Alert.alert("Invalid username", "No spaces allowed."); return; }
+    if (!/^[a-z0-9_]+$/.test(username)) { Alert.alert("Invalid username", "Only letters, numbers, and underscores."); return; }
 
     setSaving(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -71,26 +68,24 @@ export default function EditProfileScreen() {
       function decode(base64: string): Uint8Array {
         const binaryStr = atob(base64);
         const bytes = new Uint8Array(binaryStr.length);
-        for (let i = 0; i < binaryStr.length; i++) {
-          bytes[i] = binaryStr.charCodeAt(i);
-        }
+        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
         return bytes;
       }
 
       const { data, error } = await supabase.storage
         .from("media")
         .upload(fileName, decode(avatarBase64), { contentType, upsert: true });
-
       if (!error && data) {
         const { data: urlData } = supabase.storage.from("media").getPublicUrl(fileName);
         avatar_url = urlData.publicUrl;
       }
     }
 
-    console.log("[EditProfile] Saving profile for user:", user.id);
+    console.log("[EditProfile] Saving for user:", user.id);
     const { data: updated, error } = await supabase
       .from("profiles")
       .update({
+        display_name: displayName.trim() || null,
         username: username.trim().toLowerCase(),
         bio: bio.trim() || null,
         avatar_url,
@@ -102,10 +97,10 @@ export default function EditProfileScreen() {
     setSaving(false);
 
     if (error) {
-      console.error("[EditProfile] Update error:", error.message, error.code);
+      console.error("[EditProfile] Error:", error.message, error.code);
       Alert.alert("Save failed", error.message);
     } else {
-      console.log("[EditProfile] Saved successfully:", updated?.username);
+      console.log("[EditProfile] Saved:", updated?.username);
       await refreshProfile();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert("Saved!", "Your profile has been updated.", [
@@ -114,23 +109,29 @@ export default function EditProfileScreen() {
     }
   };
 
+  const inputStyle = (field: string) => [
+    styles.input,
+    {
+      backgroundColor: colors.input,
+      color: colors.foreground,
+      borderColor: focused === field ? colors.primary : colors.border,
+      fontFamily: "DMSans_400Regular",
+    } as const,
+  ];
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View
         style={[
           styles.header,
-          {
-            paddingTop: topPad + 12,
-            backgroundColor: colors.background,
-            borderBottomColor: colors.border,
-          },
+          { paddingTop: topPad + 12, backgroundColor: colors.background, borderBottomColor: colors.border },
         ]}
       >
         <TouchableOpacity onPress={() => router.back()} activeOpacity={0.7}>
           <Ionicons name="close" size={24} color={colors.foreground} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: colors.foreground, fontFamily: "DMSans_700Bold" }]}>
-          Edit profile
+          Edit Profile
         </Text>
         <TouchableOpacity
           onPress={handleSave}
@@ -139,11 +140,9 @@ export default function EditProfileScreen() {
           activeOpacity={0.85}
         >
           {saving ? (
-            <ActivityIndicator size="small" color={colors.primaryForeground} />
+            <ActivityIndicator size="small" color="#fff" />
           ) : (
-            <Text style={[styles.saveBtnText, { color: colors.primaryForeground, fontFamily: "DMSans_600SemiBold" }]}>
-              Save
-            </Text>
+            <Text style={[styles.saveBtnText, { fontFamily: "DMSans_600SemiBold" }]}>Save</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -157,6 +156,7 @@ export default function EditProfileScreen() {
         bottomOffset={20}
         keyboardShouldPersistTaps="handled"
       >
+        {/* Avatar */}
         <View style={styles.avatarSection}>
           <TouchableOpacity onPress={pickAvatar} activeOpacity={0.8}>
             {avatarUri ? (
@@ -167,7 +167,7 @@ export default function EditProfileScreen() {
               </View>
             )}
             <View style={[styles.cameraOverlay, { backgroundColor: colors.primary }]}>
-              <Ionicons name="camera" size={14} color={colors.primaryForeground} />
+              <Ionicons name="camera" size={14} color="#fff" />
             </View>
           </TouchableOpacity>
           <Text style={[styles.changePhotoText, { color: colors.primary, fontFamily: "DMSans_500Medium" }]}>
@@ -178,20 +178,30 @@ export default function EditProfileScreen() {
         <View style={styles.fields}>
           <View style={styles.field}>
             <Text style={[styles.label, { color: colors.mutedForeground, fontFamily: "DMSans_500Medium" }]}>
+              Display Name
+            </Text>
+            <TextInput
+              style={inputStyle("displayName")}
+              value={displayName}
+              onChangeText={setDisplayName}
+              onFocus={() => setFocused("displayName")}
+              onBlur={() => setFocused(null)}
+              placeholder="Your display name"
+              placeholderTextColor={colors.mutedForeground}
+              maxLength={50}
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={[styles.label, { color: colors.mutedForeground, fontFamily: "DMSans_500Medium" }]}>
               Username
             </Text>
             <TextInput
-              style={[
-                styles.input,
-                {
-                  backgroundColor: colors.card,
-                  color: colors.foreground,
-                  borderColor: colors.border,
-                  fontFamily: "DMSans_400Regular",
-                },
-              ]}
+              style={inputStyle("username")}
               value={username}
-              onChangeText={(t) => setUsername(t.toLowerCase())}
+              onChangeText={(t) => setUsername(t.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
+              onFocus={() => setFocused("username")}
+              onBlur={() => setFocused(null)}
               autoCapitalize="none"
               autoCorrect={false}
               placeholder="username"
@@ -207,14 +217,16 @@ export default function EditProfileScreen() {
               style={[
                 styles.bioInput,
                 {
-                  backgroundColor: colors.card,
+                  backgroundColor: colors.input,
                   color: colors.foreground,
-                  borderColor: colors.border,
+                  borderColor: focused === "bio" ? colors.primary : colors.border,
                   fontFamily: "DMSans_400Regular",
                 },
               ]}
               value={bio}
               onChangeText={setBio}
+              onFocus={() => setFocused("bio")}
+              onBlur={() => setFocused(null)}
               multiline
               placeholder="Tell the world what you're about..."
               placeholderTextColor={colors.mutedForeground}
@@ -242,12 +254,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   title: { fontSize: 17 },
-  saveBtn: {
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  saveBtnText: { fontSize: 14 },
+  saveBtn: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 20 },
+  saveBtnText: { fontSize: 14, color: "#fff" },
   scroll: { flex: 1 },
   content: { padding: 24, gap: 28 },
   avatarSection: { alignItems: "center", gap: 10 },

@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   Image,
   Platform,
+  ActivityIndicator,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -33,54 +34,78 @@ export default function SearchScreen() {
   const [users, setUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(false);
   const [trendingHashtags, setTrendingHashtags] = useState<string[]>([]);
+  const [suggestedPeople, setSuggestedPeople] = useState<Profile[]>([]);
+  const [following, setFollowing] = useState<Set<string>>(new Set());
   const [inputFocused, setInputFocused] = useState(false);
 
   useEffect(() => {
-    loadTrendingHashtags();
-  }, []);
+    loadDiscovery();
+  }, [user]);
 
-  const loadTrendingHashtags = async () => {
-    const { data } = await supabase
-      .from("posts")
-      .select("content")
-      .order("created_at", { ascending: false })
-      .limit(200);
-    if (!data) return;
-    const counts: Record<string, number> = {};
-    data.forEach(({ content }: { content: string }) => {
-      const matches = content.match(/#\w+/g) ?? [];
-      matches.forEach((tag: string) => {
-        const t = tag.toLowerCase();
-        counts[t] = (counts[t] ?? 0) + 1;
+  const loadDiscovery = async () => {
+    if (!user) return;
+
+    const [{ data: postData }, { data: peopleData }, { data: followingData }] = await Promise.all([
+      supabase.from("posts").select("content").order("created_at", { ascending: false }).limit(200),
+      supabase
+        .from("profiles")
+        .select("*")
+        .neq("id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(8),
+      supabase.from("followers").select("target_user_id").eq("user_id", user.id),
+    ]);
+
+    if (postData) {
+      const counts: Record<string, number> = {};
+      postData.forEach(({ content }: { content: string }) => {
+        const matches = content.match(/#\w+/g) ?? [];
+        matches.forEach((tag: string) => {
+          const t = tag.toLowerCase();
+          counts[t] = (counts[t] ?? 0) + 1;
+        });
       });
-    });
-    const sorted = Object.entries(counts)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 5)
-      .map(([tag]) => tag);
-    setTrendingHashtags(sorted);
+      setTrendingHashtags(
+        Object.entries(counts)
+          .sort(([, a], [, b]) => b - a)
+          .slice(0, 5)
+          .map(([tag]) => tag)
+      );
+    }
+
+    setSuggestedPeople((peopleData ?? []) as Profile[]);
+    setFollowing(new Set((followingData ?? []).map((f: { target_user_id: string }) => f.target_user_id)));
+  };
+
+  const handleFollowToggle = async (profileId: string) => {
+    if (!user) return;
+    const isFollowing = following.has(profileId);
+    if (isFollowing) {
+      await supabase.from("followers").delete().eq("user_id", user.id).eq("target_user_id", profileId);
+      setFollowing((prev) => { const s = new Set(prev); s.delete(profileId); return s; });
+    } else {
+      await supabase.from("followers").insert({ user_id: user.id, target_user_id: profileId });
+      await supabase.from("notifications").insert({ user_id: profileId, actor_id: user.id, type: "follow", post_id: null, read: false });
+      setFollowing((prev) => new Set([...prev, profileId]));
+    }
   };
 
   const doSearch = useCallback(
     async (q: string) => {
-      if (!q.trim()) {
-        setPosts([]);
-        setUsers([]);
-        return;
-      }
+      if (!q.trim()) { setPosts([]); setUsers([]); return; }
       setLoading(true);
       const trimmed = q.trim();
       const [{ data: postData }, { data: userData }] = await Promise.all([
         supabase
           .from("posts")
-          .select("*, profiles(*)")
+          .select("*, profiles(id, username, display_name, avatar_url, bio, verified)")
           .ilike("content", `%${trimmed}%`)
           .order("created_at", { ascending: false })
           .limit(20),
         supabase
           .from("profiles")
           .select("*")
-          .ilike("username", `%${trimmed.replace(/^@/, "")}%`)
+          .or(`username.ilike.%${trimmed.replace(/^@/, "")}%,display_name.ilike.%${trimmed}%`)
           .limit(20),
       ]);
 
@@ -92,20 +117,10 @@ export default function SearchScreen() {
             supabase.from("likes").select("post_id").in("post_id", postIds).eq("user_id", user.id),
           ]);
           const likeCounts: Record<string, number> = {};
-          (likes ?? []).forEach((l: { post_id: string }) => {
-            likeCounts[l.post_id] = (likeCounts[l.post_id] ?? 0) + 1;
-          });
+          (likes ?? []).forEach((l: { post_id: string }) => { likeCounts[l.post_id] = (likeCounts[l.post_id] ?? 0) + 1; });
           const likedSet = new Set((likesByUser ?? []).map((l: { post_id: string }) => l.post_id));
-          setPosts(
-            postData.map((p: Post) => ({
-              ...p,
-              likes_count: likeCounts[p.id] ?? 0,
-              is_liked: likedSet.has(p.id),
-            }))
-          );
-        } else {
-          setPosts([]);
-        }
+          setPosts(postData.map((p: Post) => ({ ...p, likes_count: likeCounts[p.id] ?? 0, is_liked: likedSet.has(p.id) })));
+        } else { setPosts([]); }
       }
       setUsers((userData ?? []) as Profile[]);
       setLoading(false);
@@ -114,31 +129,71 @@ export default function SearchScreen() {
   );
 
   useEffect(() => {
-    if (params.q) {
-      setQuery(params.q);
-      doSearch(params.q);
-    }
+    if (params.q) { setQuery(params.q); doSearch(params.q); }
   }, [params.q]);
 
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
   const hasQuery = query.trim().length > 0;
 
+  const PersonRow = ({ item }: { item: Profile }) => {
+    const isF = following.has(item.id);
+    return (
+      <TouchableOpacity
+        style={[styles.personRow, { borderBottomColor: colors.border }]}
+        onPress={() => {
+          if (item.id === user?.id) router.push("/(tabs)/profile");
+          else router.push({ pathname: "/user/[id]", params: { id: item.id } });
+        }}
+        activeOpacity={0.8}
+      >
+        {item.avatar_url ? (
+          <Image source={{ uri: item.avatar_url }} style={styles.avatar} />
+        ) : (
+          <View style={[styles.avatarPlaceholder, { backgroundColor: colors.secondary }]}>
+            <Ionicons name="person" size={20} color={colors.mutedForeground} />
+          </View>
+        )}
+        <View style={styles.personInfo}>
+          <UserBadge username={item.username} verified={item.verified} />
+          {item.bio && (
+            <Text style={[styles.bio, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]} numberOfLines={1}>
+              {item.bio}
+            </Text>
+          )}
+        </View>
+        {item.id !== user?.id && (
+          <TouchableOpacity
+            style={[
+              styles.followBtn,
+              isF
+                ? { backgroundColor: "transparent", borderColor: colors.border, borderWidth: 1 }
+                : { backgroundColor: colors.primary },
+            ]}
+            onPress={() => handleFollowToggle(item.id)}
+            activeOpacity={0.85}
+          >
+            <Text
+              style={[
+                styles.followBtnText,
+                { color: isF ? colors.mutedForeground : "#fff", fontFamily: "DMSans_600SemiBold" },
+              ]}
+            >
+              {isF ? "Following" : "Follow"}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View
-        style={[
-          styles.header,
-          { paddingTop: topPad + 10, backgroundColor: colors.background, borderBottomColor: colors.border },
-        ]}
-      >
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: topPad + 10, borderBottomColor: colors.border }]}>
         <View
           style={[
             styles.searchBar,
-            {
-              backgroundColor: colors.secondary,
-              borderColor: inputFocused ? colors.primary : "transparent",
-              borderWidth: 1,
-            },
+            { backgroundColor: colors.secondary, borderColor: inputFocused ? colors.primary : "transparent", borderWidth: 1 },
           ]}
         >
           <Feather name="search" size={16} color={colors.mutedForeground} />
@@ -155,46 +210,14 @@ export default function SearchScreen() {
             autoCorrect={false}
           />
           {query.length > 0 && (
-            <TouchableOpacity
-              onPress={() => {
-                setQuery("");
-                setPosts([]);
-                setUsers([]);
-              }}
-              activeOpacity={0.7}
-            >
+            <TouchableOpacity onPress={() => { setQuery(""); setPosts([]); setUsers([]); }} activeOpacity={0.7}>
               <Ionicons name="close-circle" size={16} color={colors.mutedForeground} />
             </TouchableOpacity>
           )}
         </View>
 
-        {!hasQuery && trendingHashtags.length > 0 && (
-          <View style={styles.trendingSection}>
-            <Text style={[styles.trendingLabel, { color: colors.mutedForeground, fontFamily: "DMSans_500Medium" }]}>
-              Trending
-            </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pills}>
-              {trendingHashtags.map((tag) => (
-                <TouchableOpacity
-                  key={tag}
-                  onPress={() => {
-                    setQuery(tag);
-                    doSearch(tag);
-                  }}
-                  style={[styles.hashtagPill, { backgroundColor: colors.primary + "22" }]}
-                  activeOpacity={0.75}
-                >
-                  <Text style={[styles.hashtagText, { color: colors.primary, fontFamily: "DMSans_500Medium" }]}>
-                    {tag}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-
         {hasQuery && (
-          <View style={[styles.tabs, { backgroundColor: colors.secondary }]}>
+          <View style={[styles.tabPill, { backgroundColor: colors.secondary }]}>
             {(["posts", "users"] as SearchTab[]).map((t) => (
               <TouchableOpacity
                 key={t}
@@ -205,10 +228,7 @@ export default function SearchScreen() {
                 <Text
                   style={[
                     styles.tabText,
-                    {
-                      color: activeTab === t ? "#fff" : colors.mutedForeground,
-                      fontFamily: activeTab === t ? "DMSans_600SemiBold" : "DMSans_400Regular",
-                    },
+                    { color: activeTab === t ? "#fff" : colors.mutedForeground, fontFamily: activeTab === t ? "DMSans_600SemiBold" : "DMSans_400Regular" },
                   ]}
                 >
                   {t === "posts" ? "Posts" : "People"}
@@ -219,13 +239,58 @@ export default function SearchScreen() {
         )}
       </View>
 
-      {!hasQuery ? (
-        <View style={styles.emptyContainer}>
-          <Feather name="search" size={40} color={colors.border} />
-          <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
-            Search for posts, hashtags, or people
-          </Text>
+      {loading && (
+        <View style={styles.loadingRow}>
+          <ActivityIndicator color={colors.primary} />
         </View>
+      )}
+
+      {!hasQuery ? (
+        <ScrollView contentContainerStyle={{ paddingBottom: 100 }}>
+          {/* Trending */}
+          {trendingHashtags.length > 0 && (
+            <View style={styles.section}>
+              <Text style={[styles.sectionLabel, { color: colors.mutedForeground, fontFamily: "DMSans_600SemiBold" }]}>
+                Trending
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillsRow}>
+                {trendingHashtags.map((tag) => (
+                  <TouchableOpacity
+                    key={tag}
+                    onPress={() => { setQuery(tag); doSearch(tag); }}
+                    style={[styles.hashtagPill, { backgroundColor: colors.primary + "22" }]}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.hashtagText, { color: colors.primary, fontFamily: "DMSans_600SemiBold" }]}>
+                      {tag}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
+          {/* Suggested people */}
+          {suggestedPeople.length > 0 && (
+            <View style={styles.section}>
+              <Text style={[styles.sectionLabel, { color: colors.mutedForeground, fontFamily: "DMSans_600SemiBold" }]}>
+                Suggested People
+              </Text>
+              {suggestedPeople.map((p) => (
+                <PersonRow key={p.id} item={p} />
+              ))}
+            </View>
+          )}
+
+          {trendingHashtags.length === 0 && suggestedPeople.length === 0 && (
+            <View style={styles.emptyCenter}>
+              <Feather name="search" size={40} color={colors.border} />
+              <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
+                Search for posts, hashtags, or people
+              </Text>
+            </View>
+          )}
+        </ScrollView>
       ) : activeTab === "posts" ? (
         <FlatList
           data={posts}
@@ -233,7 +298,7 @@ export default function SearchScreen() {
           renderItem={({ item }) => <PostCard post={item} />}
           ListEmptyComponent={
             !loading ? (
-              <View style={styles.empty}>
+              <View style={styles.emptyCenter}>
                 <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
                   No posts found
                 </Text>
@@ -246,38 +311,10 @@ export default function SearchScreen() {
         <FlatList
           data={users}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[styles.userRow, { borderBottomColor: colors.border }]}
-              onPress={() => {
-                if (item.id === user?.id) router.push("/(tabs)/profile");
-                else router.push({ pathname: "/user/[id]", params: { id: item.id } });
-              }}
-              activeOpacity={0.8}
-            >
-              {item.avatar_url ? (
-                <Image source={{ uri: item.avatar_url }} style={styles.avatar} />
-              ) : (
-                <View style={[styles.avatarPlaceholder, { backgroundColor: colors.secondary }]}>
-                  <Ionicons name="person" size={20} color={colors.mutedForeground} />
-                </View>
-              )}
-              <View style={styles.userInfo}>
-                <UserBadge username={item.username} verified={item.verified} />
-                {item.bio && (
-                  <Text
-                    style={[styles.bio, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}
-                    numberOfLines={1}
-                  >
-                    {item.bio}
-                  </Text>
-                )}
-              </View>
-            </TouchableOpacity>
-          )}
+          renderItem={({ item }) => <PersonRow item={item} />}
           ListEmptyComponent={
             !loading ? (
-              <View style={styles.empty}>
+              <View style={styles.emptyCenter}>
                 <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
                   No people found
                 </Text>
@@ -308,28 +345,20 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   searchInput: { flex: 1, fontSize: 15 },
-  trendingSection: { gap: 8 },
-  trendingLabel: { fontSize: 12, letterSpacing: 0.5, textTransform: "uppercase" },
-  pills: { gap: 8, paddingRight: 4 },
-  hashtagPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  hashtagText: { fontSize: 14 },
-  tabs: {
+  tabPill: {
     flexDirection: "row",
     borderRadius: 10,
     padding: 3,
   },
-  tabBtn: {
-    flex: 1,
-    paddingVertical: 7,
-    borderRadius: 8,
-    alignItems: "center",
-  },
+  tabBtn: { flex: 1, paddingVertical: 7, borderRadius: 8, alignItems: "center" },
   tabText: { fontSize: 14 },
-  userRow: {
+  loadingRow: { paddingTop: 20, alignItems: "center" },
+  section: { paddingTop: 20, gap: 12 },
+  sectionLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.6, paddingHorizontal: 16 },
+  pillsRow: { gap: 8, paddingHorizontal: 16, paddingRight: 16 },
+  hashtagPill: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99 },
+  hashtagText: { fontSize: 14 },
+  personRow: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
@@ -345,9 +374,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  userInfo: { flex: 1, gap: 2 },
+  personInfo: { flex: 1, gap: 2 },
   bio: { fontSize: 13 },
-  empty: { padding: 40, alignItems: "center" },
-  emptyContainer: { flexGrow: 1, justifyContent: "center", alignItems: "center", gap: 12, padding: 40 },
+  followBtn: { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 99 },
+  followBtnText: { fontSize: 13 },
+  emptyCenter: { padding: 60, alignItems: "center", gap: 12 },
+  emptyContainer: { flexGrow: 1, justifyContent: "center" },
   emptyText: { fontSize: 14, textAlign: "center" },
 });

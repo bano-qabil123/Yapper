@@ -7,33 +7,33 @@ import {
   StyleSheet,
   RefreshControl,
   Platform,
-  StatusBar,
+  Image,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Feather, Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { useColors } from "@/hooks/useColors";
 import { PostCard } from "@/components/PostCard";
 import { PostSkeleton } from "@/components/SkeletonLoader";
 import { supabase, Post } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
+import { useNotificationBadge } from "@/context/NotificationBadgeContext";
 
 type Tab = "all" | "following";
 
 async function fetchPosts(tab: Tab, userId: string): Promise<Post[]> {
   let query = supabase
     .from("posts")
-    .select(`
-      id, user_id, content, media_url, created_at,
-      profiles ( id, username, avatar_url, bio, verified )
-    `)
+    .select("*, profiles(id, username, display_name, avatar_url, bio, verified)")
     .order("created_at", { ascending: false })
-    .limit(30);
+    .limit(40);
 
   if (tab === "following") {
     const { data: following, error: fwErr } = await supabase
       .from("followers")
       .select("target_user_id")
       .eq("user_id", userId);
-    if (fwErr) console.warn("[Feed] followers fetch error:", fwErr.message);
+    if (fwErr) console.warn("[Feed] followers error:", fwErr.message);
     const ids = (following ?? []).map((f: { target_user_id: string }) => f.target_user_id);
     if (ids.length === 0) return [];
     query = query.in("user_id", ids);
@@ -41,23 +41,22 @@ async function fetchPosts(tab: Tab, userId: string): Promise<Post[]> {
 
   const { data, error } = await query;
   if (error) {
-    console.error("[Feed] posts query error:", error.message, error.code, error.details);
+    console.error("[Feed] posts query error:", error.message, "code:", error.code);
     return [];
   }
   if (!data || data.length === 0) {
-    console.log("[Feed] posts query returned 0 rows");
+    console.log("[Feed] No posts returned");
     return [];
   }
 
-  console.log("[Feed] raw posts count:", data.length, "first post:", data[0]?.id);
+  console.log("[Feed] Got", data.length, "posts");
 
   const postIds = data.map((p: Post) => p.id);
-  const [{ data: likes, error: likesErr }, { data: likesByUser }, { data: comments }] = await Promise.all([
+  const [{ data: likes }, { data: likesByUser }, { data: comments }] = await Promise.all([
     supabase.from("likes").select("post_id").in("post_id", postIds),
     supabase.from("likes").select("post_id").in("post_id", postIds).eq("user_id", userId),
     supabase.from("comments").select("post_id").in("post_id", postIds),
   ]);
-  if (likesErr) console.warn("[Feed] likes fetch error:", likesErr.message);
 
   const likeCounts: Record<string, number> = {};
   (likes ?? []).forEach((l: { post_id: string }) => {
@@ -80,7 +79,9 @@ async function fetchPosts(tab: Tab, userId: string): Promise<Post[]> {
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const router = useRouter();
+  const { user, profile } = useAuth();
+  const { unreadCount } = useNotificationBadge();
   const [activeTab, setActiveTab] = useState<Tab>("all");
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,12 +95,10 @@ export default function HomeScreen() {
       }
       if (!silent) setLoading(true);
       try {
-        console.log("[Feed] Loading posts for tab:", activeTab, "user:", user.id);
         const data = await fetchPosts(activeTab, user.id);
-        console.log("[Feed] Got", data.length, "posts");
         setPosts(data);
       } catch (err) {
-        console.error("[Feed] fetchPosts threw:", err);
+        console.error("[Feed] fetch threw:", err);
         setPosts([]);
       } finally {
         setLoading(false);
@@ -127,21 +126,13 @@ export default function HomeScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
-      <View
-        style={[
-          styles.header,
-          {
-            paddingTop: topPad + 10,
-            backgroundColor: colors.background,
-            borderBottomColor: colors.border,
-          },
-        ]}
-      >
-        <Text style={[styles.wordmark, { color: colors.primary, fontFamily: "DMSans_700Bold" }]}>
-          vibe
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: topPad + 10, borderBottomColor: colors.border }]}>
+        <Text style={[styles.wordmark, { color: colors.foreground, fontFamily: "DMSans_700Bold" }]}>
+          Vibe <Text style={{ color: colors.primary }}>⚡</Text>
         </Text>
-        <View style={styles.pillRow}>
+
+        <View style={[styles.pillRow]}>
           {(["all", "following"] as Tab[]).map((t) => (
             <TouchableOpacity
               key={t}
@@ -163,10 +154,33 @@ export default function HomeScreen() {
                   },
                 ]}
               >
-                {t === "all" ? "All Feed" : "Following"}
+                {t === "all" ? "All" : "Following"}
               </Text>
             </TouchableOpacity>
           ))}
+        </View>
+
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            onPress={() => router.push("/(tabs)/notifications")}
+            style={styles.headerBtn}
+            activeOpacity={0.7}
+          >
+            <Feather name="bell" size={22} color={colors.foreground} />
+            {unreadCount > 0 && <View style={[styles.bellDot, { backgroundColor: colors.destructive }]} />}
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => router.push("/(tabs)/profile")}
+            activeOpacity={0.8}
+          >
+            {profile?.avatar_url ? (
+              <Image source={{ uri: profile.avatar_url }} style={styles.headerAvatar} />
+            ) : (
+              <View style={[styles.headerAvatarPlaceholder, { backgroundColor: colors.secondary }]}>
+                <Ionicons name="person" size={14} color={colors.mutedForeground} />
+              </View>
+            )}
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -195,19 +209,29 @@ export default function HomeScreen() {
           }
           ListEmptyComponent={
             <View style={styles.empty}>
+              <Text style={[styles.emptyIcon]}>✦</Text>
               <Text style={[styles.emptyTitle, { color: colors.foreground, fontFamily: "DMSans_600SemiBold" }]}>
                 {activeTab === "following" ? "Follow people to see their posts" : "No posts yet"}
               </Text>
               <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
                 {activeTab === "following"
-                  ? "Find interesting people in Search"
+                  ? "Find people in Search"
                   : "Be the first to post something real"}
               </Text>
             </View>
           }
-          contentContainerStyle={posts.length === 0 ? styles.emptyContainer : { paddingBottom: 100 }}
+          contentContainerStyle={posts.length === 0 ? styles.emptyContainer : { paddingBottom: 120 }}
         />
       )}
+
+      {/* Floating create button */}
+      <TouchableOpacity
+        style={[styles.fab, { backgroundColor: colors.primary, bottom: insets.bottom + 70 }]}
+        onPress={() => router.push("/(tabs)/create")}
+        activeOpacity={0.85}
+      >
+        <Feather name="plus" size={24} color="#fff" />
+      </TouchableOpacity>
     </View>
   );
 }
@@ -215,22 +239,52 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: {
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 12,
   },
-  wordmark: { fontSize: 26, letterSpacing: -1 },
-  pillRow: { flexDirection: "row", gap: 8 },
-  pill: {
-    paddingHorizontal: 18,
-    paddingVertical: 7,
-    borderRadius: 20,
+  wordmark: { fontSize: 20, letterSpacing: -0.5 },
+  pillRow: { flexDirection: "row", gap: 6 },
+  pill: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 99 },
+  pillText: { fontSize: 13 },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 12 },
+  headerBtn: { position: "relative" },
+  bellDot: {
+    position: "absolute",
+    top: -1,
+    right: -2,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
-  pillText: { fontSize: 14 },
-  empty: { padding: 40, alignItems: "center", gap: 8 },
+  headerAvatar: { width: 30, height: 30, borderRadius: 15 },
+  headerAvatarPlaceholder: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  empty: { alignItems: "center", gap: 8, padding: 40 },
   emptyContainer: { flexGrow: 1, justifyContent: "center" },
+  emptyIcon: { fontSize: 32, color: "#7c5cfc" },
   emptyTitle: { fontSize: 16, textAlign: "center" },
   emptyText: { fontSize: 14, textAlign: "center" },
+  fab: {
+    position: "absolute",
+    right: 20,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#7c5cfc",
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
 });

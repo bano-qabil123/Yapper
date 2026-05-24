@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
-  FlatList,
+  SectionList,
   StyleSheet,
   TouchableOpacity,
   Image,
@@ -16,26 +16,40 @@ import { useColors } from "@/hooks/useColors";
 import { supabase, Notification } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import { useNotificationBadge } from "@/context/NotificationBadgeContext";
-import { UserBadge } from "@/components/UserBadge";
 
 function timeAgo(dateStr: string): string {
   const now = Date.now();
   const diff = now - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "now";
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60) return `${mins}m`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
+  if (hrs < 24) return `${hrs}h`;
   const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
+  if (days < 7) return `${days}d`;
+  return `${Math.floor(days / 7)}w`;
 }
 
-function NotifIcon({ type }: { type: string }) {
-  if (type === "follow") return <Ionicons name="person-add" size={14} color="#7c5cfc" />;
-  if (type === "comment") return <Feather name="message-circle" size={14} color="#7c5cfc" />;
-  if (type === "like") return <Ionicons name="heart" size={14} color="#ff453a" />;
-  return null;
+function notifLabel(type: string): string {
+  if (type === "follow") return "followed you";
+  if (type === "like") return "liked your post";
+  if (type === "comment") return "commented on your post";
+  return "";
 }
+
+function NotifIconCircle({ type, colors }: { type: string; colors: ReturnType<typeof import("@/hooks/useColors").useColors> }) {
+  const iconColor = type === "like" ? "#ff4d4d" : colors.primary;
+  const bgColor = type === "like" ? "#ff4d4d22" : colors.primary + "22";
+  return (
+    <View style={[styles.iconCircle, { backgroundColor: bgColor }]}>
+      {type === "follow" && <Ionicons name="person-add" size={14} color={iconColor} />}
+      {type === "like" && <Ionicons name="heart" size={14} color={iconColor} />}
+      {type === "comment" && <Feather name="message-circle" size={14} color={iconColor} />}
+    </View>
+  );
+}
+
+type Section = { title: string; data: Notification[] };
 
 export default function NotificationsScreen() {
   const colors = useColors();
@@ -52,32 +66,33 @@ export default function NotificationsScreen() {
     async (silent = false) => {
       if (!user) return;
       if (!silent) setLoading(true);
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("notifications")
-        .select("*, profiles!notifications_actor_id_fkey(*), posts(id, content)")
+        .select("*, profiles!notifications_actor_id_fkey(id, username, display_name, avatar_url, verified), posts(id, content)")
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
-        .limit(40);
+        .limit(60);
+      if (error) console.error("[Notifs] error:", error.message);
       setNotifications((data as Notification[]) ?? []);
       setLoading(false);
       setRefreshing(false);
-
-      if (data) {
-        const unread = data.filter((n: Notification) => !n.read).map((n: Notification) => n.id);
-        if (unread.length > 0) {
-          await supabase.from("notifications").update({ read: true }).in("id", unread);
-          markAllRead();
-        }
-      }
     },
-    [user, markAllRead]
+    [user]
   );
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const handlePress = (notif: Notification) => {
+  const handlePress = async (notif: Notification) => {
+    if (!notif.read) {
+      await supabase.from("notifications").update({ read: true }).eq("id", notif.id);
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === notif.id ? { ...n, read: true } : n))
+      );
+      const anyUnread = notifications.some((n) => !n.read && n.id !== notif.id);
+      if (!anyUnread) markAllRead();
+    }
     if (notif.type === "follow") {
       router.push({ pathname: "/user/[id]", params: { id: notif.actor_id } });
     } else if (notif.post_id) {
@@ -85,61 +100,76 @@ export default function NotificationsScreen() {
     }
   };
 
-  const renderNotif = ({ item }: { item: Notification }) => {
-    const label =
-      item.type === "follow"
-        ? "followed you"
-        : item.type === "like"
-        ? "liked your post"
-        : "commented on your post";
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const newNotifs = notifications.filter((n) => !n.read || new Date(n.created_at).getTime() > cutoff);
+  const earlierNotifs = notifications.filter((n) => n.read && new Date(n.created_at).getTime() <= cutoff);
 
-    return (
-      <TouchableOpacity
-        style={[
-          styles.row,
-          {
-            backgroundColor: item.read ? "transparent" : colors.primary + "12",
-            borderBottomColor: colors.border,
-          },
-        ]}
-        onPress={() => handlePress(item)}
-        activeOpacity={0.85}
-      >
-        <View style={styles.iconWrap}>
-          {item.profiles?.avatar_url ? (
-            <Image source={{ uri: item.profiles.avatar_url }} style={styles.avatar} />
-          ) : (
-            <View style={[styles.avatarPlaceholder, { backgroundColor: colors.secondary }]}>
-              <Ionicons name="person" size={18} color={colors.mutedForeground} />
-            </View>
-          )}
-          <View style={[styles.badge, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}>
-            <NotifIcon type={item.type} />
+  const sections: Section[] = [];
+  if (newNotifs.length > 0) sections.push({ title: "New", data: newNotifs });
+  if (earlierNotifs.length > 0) sections.push({ title: "Earlier", data: earlierNotifs });
+
+  const renderItem = ({ item }: { item: Notification }) => (
+    <TouchableOpacity
+      style={[
+        styles.row,
+        {
+          backgroundColor: item.read ? "transparent" : colors.primary + "10",
+          borderBottomColor: colors.border,
+        },
+      ]}
+      onPress={() => handlePress(item)}
+      activeOpacity={0.85}
+    >
+      {/* Avatar + icon overlay */}
+      <View style={styles.avatarWrap}>
+        {item.profiles?.avatar_url ? (
+          <Image source={{ uri: item.profiles.avatar_url }} style={styles.avatar} />
+        ) : (
+          <View style={[styles.avatarPlaceholder, { backgroundColor: colors.secondary }]}>
+            <Ionicons name="person" size={18} color={colors.mutedForeground} />
           </View>
+        )}
+        <View style={styles.iconBadge}>
+          <NotifIconCircle type={item.type} colors={colors} />
         </View>
+      </View>
 
-        <View style={styles.content}>
+      <View style={styles.content}>
+        <View style={styles.textRow}>
           <Text style={[styles.text, { color: colors.foreground, fontFamily: "DMSans_400Regular" }]}>
             <Text style={{ fontFamily: "DMSans_600SemiBold" }}>
               {item.profiles?.username ?? "someone"}
-            </Text>{" "}
-            {label}
-          </Text>
-          {item.posts?.content && (
-            <Text
-              style={[styles.postPreview, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}
-              numberOfLines={1}
-            >
-              {item.posts.content}
             </Text>
-          )}
+            {"  "}
+            {notifLabel(item.type)}
+          </Text>
           <Text style={[styles.time, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
             {timeAgo(item.created_at)}
           </Text>
         </View>
-      </TouchableOpacity>
-    );
-  };
+        {item.posts?.content && (
+          <Text
+            style={[styles.postPreview, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}
+            numberOfLines={1}
+          >
+            {item.posts.content}
+          </Text>
+        )}
+      </View>
+
+      {!item.read && (
+        <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />
+      )}
+    </TouchableOpacity>
+  );
+
+  const renderSectionHeader = ({ section }: { section: Section }) => (
+    <View style={[styles.sectionHeader, { backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+      <Text style={[styles.sectionTitle, { color: colors.mutedForeground, fontFamily: "DMSans_600SemiBold" }]}>
+        {section.title}
+      </Text>
+    </View>
+  );
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -154,35 +184,33 @@ export default function NotificationsScreen() {
         </Text>
       </View>
 
-      <FlatList
-        data={notifications}
-        keyExtractor={(item) => item.id}
-        renderItem={renderNotif}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              load(true);
-            }}
-            tintColor={colors.primary}
-          />
-        }
-        ListEmptyComponent={
-          !loading ? (
-            <View style={styles.empty}>
-              <Feather name="bell" size={40} color={colors.border} />
-              <Text style={[styles.emptyTitle, { color: colors.foreground, fontFamily: "DMSans_600SemiBold" }]}>
-                All caught up
-              </Text>
-              <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
-                When someone follows or engages with your posts, it'll show up here.
-              </Text>
-            </View>
-          ) : null
-        }
-        contentContainerStyle={notifications.length === 0 ? styles.emptyContainer : { paddingBottom: 100 }}
-      />
+      {!loading && sections.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Feather name="bell" size={40} color={colors.border} />
+          <Text style={[styles.emptyTitle, { color: colors.foreground, fontFamily: "DMSans_600SemiBold" }]}>
+            All caught up
+          </Text>
+          <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
+            When someone engages with your posts, it'll show up here.
+          </Text>
+        </View>
+      ) : (
+        <SectionList
+          sections={sections}
+          keyExtractor={(item) => item.id}
+          renderItem={renderItem}
+          renderSectionHeader={renderSectionHeader}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => { setRefreshing(true); load(true); }}
+              tintColor={colors.primary}
+            />
+          }
+          stickySectionHeadersEnabled
+          contentContainerStyle={{ paddingBottom: 100 }}
+        />
+      )}
     </View>
   );
 }
@@ -195,15 +223,21 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   title: { fontSize: 22 },
+  sectionHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  sectionTitle: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5 },
   row: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 12,
   },
-  iconWrap: { position: "relative" },
+  avatarWrap: { position: "relative" },
   avatar: { width: 44, height: 44, borderRadius: 22 },
   avatarPlaceholder: {
     width: 44,
@@ -212,10 +246,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  badge: {
+  iconBadge: {
     position: "absolute",
     bottom: -2,
-    right: -4,
+    right: -6,
+  },
+  iconCircle: {
     width: 22,
     height: 22,
     borderRadius: 11,
@@ -223,11 +259,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   content: { flex: 1, gap: 3 },
-  text: { fontSize: 14, lineHeight: 20 },
+  textRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 8 },
+  text: { fontSize: 14, lineHeight: 20, flex: 1 },
+  time: { fontSize: 12, flexShrink: 0, marginTop: 2 },
   postPreview: { fontSize: 13 },
-  time: { fontSize: 12 },
-  empty: { padding: 40, alignItems: "center", gap: 12 },
-  emptyContainer: { flexGrow: 1, justifyContent: "center" },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    alignSelf: "center",
+    flexShrink: 0,
+  },
+  emptyContainer: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, padding: 40 },
   emptyTitle: { fontSize: 16 },
   emptyText: { fontSize: 14, textAlign: "center" },
 });
