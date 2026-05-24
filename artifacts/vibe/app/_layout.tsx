@@ -25,18 +25,20 @@ function RootLayoutNav() {
 
   if (loading) return null;
 
+  if (!session) {
+    return (
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(auth)" />
+      </Stack>
+    );
+  }
+
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      {session ? (
-        <>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="post/[id]" />
-          <Stack.Screen name="user/[id]" />
-          <Stack.Screen name="edit-profile" />
-        </>
-      ) : (
-        <Stack.Screen name="(auth)" />
-      )}
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="post/[id]" />
+      <Stack.Screen name="user/[id]" />
+      <Stack.Screen name="edit-profile" />
     </Stack>
   );
 }
