@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "Ij4y1tv1Wktrnsx0vtbei"
+uri = "file://artifacts/vibe/assets/images/icon.png"
+type = "image"
+title = "generated_image"
