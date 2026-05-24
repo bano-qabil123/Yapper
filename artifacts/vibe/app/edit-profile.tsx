@@ -87,23 +87,30 @@ export default function EditProfileScreen() {
       }
     }
 
-    const { error } = await supabase
+    console.log("[EditProfile] Saving profile for user:", user.id);
+    const { data: updated, error } = await supabase
       .from("profiles")
       .update({
         username: username.trim().toLowerCase(),
         bio: bio.trim() || null,
         avatar_url,
       })
-      .eq("id", user.id);
+      .eq("id", user.id)
+      .select()
+      .single();
 
     setSaving(false);
 
     if (error) {
-      Alert.alert("Error", error.message);
+      console.error("[EditProfile] Update error:", error.message, error.code);
+      Alert.alert("Save failed", error.message);
     } else {
+      console.log("[EditProfile] Saved successfully:", updated?.username);
       await refreshProfile();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.back();
+      Alert.alert("Saved!", "Your profile has been updated.", [
+        { text: "OK", onPress: () => router.back() },
+      ]);
     }
   };
 

@@ -21,31 +21,43 @@ type Tab = "all" | "following";
 async function fetchPosts(tab: Tab, userId: string): Promise<Post[]> {
   let query = supabase
     .from("posts")
-    .select("*, profiles(*)")
+    .select(`
+      id, user_id, content, media_url, created_at,
+      profiles ( id, username, avatar_url, bio, verified )
+    `)
     .order("created_at", { ascending: false })
     .limit(30);
 
   if (tab === "following") {
-    const { data: following } = await supabase
+    const { data: following, error: fwErr } = await supabase
       .from("followers")
       .select("target_user_id")
       .eq("user_id", userId);
+    if (fwErr) console.warn("[Feed] followers fetch error:", fwErr.message);
     const ids = (following ?? []).map((f: { target_user_id: string }) => f.target_user_id);
     if (ids.length === 0) return [];
     query = query.in("user_id", ids);
   }
 
   const { data, error } = await query;
-  if (error || !data) return [];
+  if (error) {
+    console.error("[Feed] posts query error:", error.message, error.code, error.details);
+    return [];
+  }
+  if (!data || data.length === 0) {
+    console.log("[Feed] posts query returned 0 rows");
+    return [];
+  }
 
-  if (data.length === 0) return [];
+  console.log("[Feed] raw posts count:", data.length, "first post:", data[0]?.id);
 
   const postIds = data.map((p: Post) => p.id);
-  const [{ data: likes }, { data: likesByUser }, { data: comments }] = await Promise.all([
+  const [{ data: likes, error: likesErr }, { data: likesByUser }, { data: comments }] = await Promise.all([
     supabase.from("likes").select("post_id").in("post_id", postIds),
     supabase.from("likes").select("post_id").in("post_id", postIds).eq("user_id", userId),
     supabase.from("comments").select("post_id").in("post_id", postIds),
   ]);
+  if (likesErr) console.warn("[Feed] likes fetch error:", likesErr.message);
 
   const likeCounts: Record<string, number> = {};
   (likes ?? []).forEach((l: { post_id: string }) => {
@@ -82,9 +94,12 @@ export default function HomeScreen() {
       }
       if (!silent) setLoading(true);
       try {
+        console.log("[Feed] Loading posts for tab:", activeTab, "user:", user.id);
         const data = await fetchPosts(activeTab, user.id);
+        console.log("[Feed] Got", data.length, "posts");
         setPosts(data);
-      } catch {
+      } catch (err) {
+        console.error("[Feed] fetchPosts threw:", err);
         setPosts([]);
       } finally {
         setLoading(false);

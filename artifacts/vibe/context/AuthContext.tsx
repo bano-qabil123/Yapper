@@ -27,12 +27,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   async function fetchProfile(userId: string) {
-    const { data } = await supabase
+    console.log("[Auth] Fetching profile for", userId);
+    const { data, error } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", userId)
       .single();
-    if (data) setProfile(data as Profile);
+    if (error) {
+      console.warn("[Auth] Profile fetch error:", error.message);
+    } else if (data) {
+      console.log("[Auth] Profile loaded:", data.username);
+      setProfile(data as Profile);
+    }
   }
 
   async function refreshProfile() {
@@ -40,36 +46,68 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id).finally(() => setLoading(false));
+    let initialCheckDone = false;
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      console.log("[Auth] onAuthStateChange event:", _event, "session:", !!newSession);
+      setSession(newSession);
+      setUser(newSession?.user ?? null);
+      if (newSession?.user) {
+        fetchProfile(newSession.user.id);
       } else {
+        setProfile(null);
+      }
+      if (!initialCheckDone) {
+        initialCheckDone = true;
         setLoading(false);
       }
     });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id);
+    supabase.auth.getSession().then(({ data: { session: existingSession }, error }) => {
+      if (error) {
+        console.warn("[Auth] getSession error:", error.message);
       } else {
-        setProfile(null);
+        console.log("[Auth] getSession result:", existingSession ? "has session" : "no session");
+      }
+      if (!initialCheckDone) {
+        initialCheckDone = true;
+        setSession(existingSession);
+        setUser(existingSession?.user ?? null);
+        if (existingSession?.user) {
+          fetchProfile(existingSession.user.id).finally(() => setLoading(false));
+        } else {
+          setLoading(false);
+        }
+      }
+    }).catch((err) => {
+      console.error("[Auth] getSession threw:", err);
+      if (!initialCheckDone) {
+        initialCheckDone = true;
+        setLoading(false);
       }
     });
 
-    return () => subscription.unsubscribe();
+    const timeout = setTimeout(() => {
+      if (!initialCheckDone) {
+        console.warn("[Auth] Session check timed out — forcing loading=false");
+        initialCheckDone = true;
+        setLoading(false);
+      }
+    }, 5000);
+
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timeout);
+    };
   }, []);
 
   const signOut = async () => {
+    console.log("[Auth] Signing out");
     setSession(null);
     setUser(null);
     setProfile(null);
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
+    if (error) console.warn("[Auth] Sign out error:", error.message);
   };
 
   return (
