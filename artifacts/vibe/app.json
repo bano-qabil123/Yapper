@@ -14,7 +14,8 @@
       "backgroundColor": "#0e0e0f"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.anonymous.vibe"
     },
     "android": {
       "adaptiveIcon": {
