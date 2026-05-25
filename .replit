@@ -100,3 +100,6 @@ externalPort = 3001
 [[ports]]
 localPort = 25535
 externalPort = 4200
+
+[nix]
+packages = ["csound"]

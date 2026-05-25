@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "fff292db-de19-43b1-b57a-5c65e5d78f97"
+      }
+    },
+    "android": {
+      "package": "com.umer_insta_user.workspace"
+    }
+  }
+}

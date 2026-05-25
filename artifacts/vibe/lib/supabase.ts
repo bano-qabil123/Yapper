@@ -19,6 +19,9 @@ export type Profile = {
   avatar_url: string | null;
   verified: boolean;
   created_at: string;
+  onboarded?: boolean;
+  interests?: string[];
+  push_notifications?: boolean;
 };
 
 export type Post = {
@@ -27,10 +30,12 @@ export type Post = {
   content: string;
   media_url: string | null;
   created_at: string;
+  views?: number;
   author?: Profile;
   likes_count?: number;
   comments_count?: number;
   is_liked?: boolean;
+  is_bookmarked?: boolean;
 };
 
 export type Comment = {
@@ -42,6 +47,23 @@ export type Comment = {
   parent_id: string | null;
   profiles?: Profile;
   replies?: Comment[];
+};
+
+export type Message = {
+  id: string;
+  sender_id: string;
+  receiver_id: string;
+  content: string;
+  read: boolean;
+  created_at: string;
+  sender?: Profile;
+  receiver?: Profile;
+};
+
+export type Bookmark = {
+  post_id: string;
+  user_id: string;
+  created_at: string;
 };
 
 export type Notification = {
