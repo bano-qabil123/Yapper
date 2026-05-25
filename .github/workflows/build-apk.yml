@@ -13,10 +13,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+      
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'pnpm'
       
       - name: Setup Expo
         uses: expo/expo-github-action@v8
@@ -26,10 +32,8 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
       
       - name: Install dependencies
-        run: npm install
+        run: pnpm install
       
       - name: Build APK on EAS
         run: |
-          npx eas build --platform android --profile preview --non-interactive
-          echo "✅ Build started! Download APK from https://expo.dev"
-          
+          npx eas build --platf
