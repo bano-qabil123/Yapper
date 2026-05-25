@@ -39,7 +39,9 @@ export type Comment = {
   user_id: string;
   content: string;
   created_at: string;
+  parent_id: string | null;
   profiles?: Profile;
+  replies?: Comment[];
 };
 
 export type Notification = {

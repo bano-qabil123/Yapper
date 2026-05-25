@@ -56,13 +56,22 @@ async function fetchUserPosts(userId: string): Promise<Post[]> {
 }
 
 async function fetchLikedPosts(userId: string): Promise<Post[]> {
-  const { data, error } = await supabase
+  const { data: likedData, error: likedError } = await supabase
     .from("likes")
-    .select("posts(*, author:profiles!posts_user_id_fkey(id, username, display_name, avatar_url, bio, verified))")
-    .eq("user_id", userId)
+    .select("post_id")
+    .eq("user_id", userId);
+  if (likedError) { console.error("[Profile] likes error:", likedError.message); return []; }
+
+  const postIds = (likedData ?? []).map((l: { post_id: string }) => l.post_id);
+  if (postIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("posts")
+    .select("*, author:profiles!posts_user_id_fkey(id, username, display_name, avatar_url, bio, verified)")
+    .in("id", postIds)
     .order("created_at", { ascending: false });
-  if (error) { console.error("[Profile] likes error:", error.message); return []; }
-  return ((data ?? []).map((d: { posts: Post }) => d.posts).filter(Boolean)) as Post[];
+  if (error) { console.error("[Profile] liked posts error:", error.message); return []; }
+  return (data ?? []) as Post[];
 }
 
 export default function ProfileScreen() {

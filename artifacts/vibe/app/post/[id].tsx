@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useColors } from "@/hooks/useColors";
@@ -27,10 +27,13 @@ export default function PostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
   const [post, setPost] = useState<Post | null>(null);
-  const [comments, setComments] = useState<Comment[]>([]);
+  const [rootComments, setRootComments] = useState<Comment[]>([]);
+  const [repliesMap, setRepliesMap] = useState<Record<string, Comment[]>>({});
   const [commentText, setCommentText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [replyingTo, setReplyingTo] = useState<Comment | null>(null);
+  const inputRef = useRef<TextInput>(null);
 
   const load = useCallback(async () => {
     if (!id || !user) return;
@@ -55,13 +58,31 @@ export default function PostDetailScreen() {
         is_liked: (likesByUser?.length ?? 0) > 0,
       } as Post);
     }
-    setComments((commentData ?? []) as Comment[]);
+
+    const allComments = (commentData ?? []) as Comment[];
+    const roots = allComments.filter((c) => !c.parent_id);
+    const replies: Record<string, Comment[]> = {};
+    allComments.filter((c) => c.parent_id).forEach((c) => {
+      if (!replies[c.parent_id!]) replies[c.parent_id!] = [];
+      replies[c.parent_id!].push(c);
+    });
+    setRootComments(roots);
+    setRepliesMap(replies);
     setLoading(false);
   }, [id, user]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
+
+  const handleReply = (comment: Comment) => {
+    setReplyingTo(comment);
+    setCommentText(`@${comment.profiles?.username ?? ""} `);
+    setTimeout(() => inputRef.current?.focus(), 100);
+  };
+
+  const clearReply = () => {
+    setReplyingTo(null);
+    setCommentText("");
+  };
 
   const handleSubmitComment = async () => {
     if (!commentText.trim() || !user || !id) return;
@@ -72,6 +93,7 @@ export default function PostDetailScreen() {
       post_id: id,
       user_id: user.id,
       content: commentText.trim(),
+      parent_id: replyingTo?.id ?? null,
     });
 
     if (!error) {
@@ -85,6 +107,7 @@ export default function PostDetailScreen() {
         });
       }
       setCommentText("");
+      setReplyingTo(null);
       setPost((prev) => prev ? { ...prev, comments_count: (prev.comments_count ?? 0) + 1 } : prev);
       load();
     }
@@ -93,9 +116,7 @@ export default function PostDetailScreen() {
 
   const handleLikeToggle = useCallback((postId: string, liked: boolean) => {
     setPost((prev) =>
-      prev
-        ? { ...prev, is_liked: liked, likes_count: (prev.likes_count ?? 0) + (liked ? 1 : -1) }
-        : prev
+      prev ? { ...prev, is_liked: liked, likes_count: (prev.likes_count ?? 0) + (liked ? 1 : -1) } : prev
     );
   }, []);
 
@@ -107,12 +128,15 @@ export default function PostDetailScreen() {
     );
   }
 
+  const totalComments = rootComments.length + Object.values(repliesMap).reduce((a, r) => a + r.length, 0);
+
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.background }]}
       behavior="padding"
       keyboardVerticalOffset={0}
     >
+      {/* Header */}
       <View
         style={[
           styles.header,
@@ -133,16 +157,22 @@ export default function PostDetailScreen() {
       </View>
 
       <FlatList
-        data={comments}
+        data={rootComments}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <CommentItem comment={item} />}
+        renderItem={({ item }) => (
+          <CommentItem
+            comment={item}
+            replies={repliesMap[item.id] ?? []}
+            onReply={handleReply}
+          />
+        )}
         ListHeaderComponent={
           post ? (
             <View>
               <PostCard post={post} onLikeToggle={handleLikeToggle} />
               <View style={[styles.commentsLabel, { borderBottomColor: colors.border }]}>
                 <Text style={[styles.commentsText, { color: colors.mutedForeground, fontFamily: "DMSans_500Medium" }]}>
-                  {comments.length} {comments.length === 1 ? "reply" : "replies"}
+                  {totalComments} {totalComments === 1 ? "reply" : "replies"}
                 </Text>
               </View>
             </View>
@@ -159,6 +189,22 @@ export default function PostDetailScreen() {
         keyboardShouldPersistTaps="handled"
       />
 
+      {/* Reply banner */}
+      {replyingTo && (
+        <View style={[styles.replyBanner, { backgroundColor: colors.card2, borderTopColor: colors.border }]}>
+          <Text style={[styles.replyBannerText, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>
+            Replying to{" "}
+            <Text style={{ color: colors.primary, fontFamily: "DMSans_600SemiBold" }}>
+              @{replyingTo.profiles?.username ?? "someone"}
+            </Text>
+          </Text>
+          <TouchableOpacity onPress={clearReply} activeOpacity={0.7}>
+            <Feather name="x" size={16} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Comment input */}
       <View
         style={[
           styles.inputRow,
@@ -170,15 +216,12 @@ export default function PostDetailScreen() {
         ]}
       >
         <TextInput
+          ref={inputRef}
           style={[
             styles.textInput,
-            {
-              backgroundColor: colors.secondary,
-              color: colors.foreground,
-              fontFamily: "DMSans_400Regular",
-            },
+            { backgroundColor: colors.secondary, color: colors.foreground, fontFamily: "DMSans_400Regular" },
           ]}
-          placeholder="Reply..."
+          placeholder={replyingTo ? `Reply to @${replyingTo.profiles?.username ?? "someone"}...` : "Reply..."}
           placeholderTextColor={colors.mutedForeground}
           value={commentText}
           onChangeText={setCommentText}
@@ -227,6 +270,15 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   commentsText: { fontSize: 13 },
+  replyBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  replyBannerText: { fontSize: 13 },
   inputRow: {
     flexDirection: "row",
     alignItems: "flex-end",

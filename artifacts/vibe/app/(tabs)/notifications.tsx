@@ -38,8 +38,9 @@ function notifLabel(type: string): string {
 }
 
 function NotifIconCircle({ type, colors }: { type: string; colors: ReturnType<typeof import("@/hooks/useColors").useColors> }) {
-  const iconColor = type === "like" ? "#ff4d4d" : colors.primary;
-  const bgColor = type === "like" ? "#ff4d4d22" : colors.primary + "22";
+  const isGreen = type === "follow" || type === "like";
+  const iconColor = isGreen ? colors.accentGreen : colors.primary;
+  const bgColor = iconColor + "22";
   return (
     <View style={[styles.iconCircle, { backgroundColor: bgColor }]}>
       {type === "follow" && <Ionicons name="person-add" size={14} color={iconColor} />}

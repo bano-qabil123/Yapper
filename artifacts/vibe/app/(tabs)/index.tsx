@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -20,6 +20,28 @@ import { useAuth } from "@/context/AuthContext";
 import { useNotificationBadge } from "@/context/NotificationBadgeContext";
 
 type Tab = "all" | "following";
+
+async function fetchSinglePost(postId: string, userId: string): Promise<Post | null> {
+  const { data, error } = await supabase
+    .from("posts")
+    .select("*, author:profiles!posts_user_id_fkey(id, username, display_name, avatar_url, bio, verified)")
+    .eq("id", postId)
+    .single();
+  if (error || !data) return null;
+
+  const [{ data: likes }, { data: likesByUser }, { data: comments }] = await Promise.all([
+    supabase.from("likes").select("post_id").eq("post_id", postId),
+    supabase.from("likes").select("post_id").eq("post_id", postId).eq("user_id", userId),
+    supabase.from("comments").select("post_id").eq("post_id", postId),
+  ]);
+
+  return {
+    ...data,
+    likes_count: likes?.length ?? 0,
+    comments_count: comments?.length ?? 0,
+    is_liked: (likesByUser?.length ?? 0) > 0,
+  } as Post;
+}
 
 async function fetchPosts(tab: Tab, userId: string): Promise<Post[]> {
   let query = supabase
@@ -48,7 +70,6 @@ async function fetchPosts(tab: Tab, userId: string): Promise<Post[]> {
     console.log("[Feed] No posts returned");
     return [];
   }
-
   console.log("[Feed] Got", data.length, "posts");
 
   const postIds = data.map((p: Post) => p.id);
@@ -86,13 +107,11 @@ export default function HomeScreen() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const load = useCallback(
     async (silent = false) => {
-      if (!user) {
-        setLoading(false);
-        return;
-      }
+      if (!user) { setLoading(false); return; }
       if (!silent) setLoading(true);
       try {
         const data = await fetchPosts(activeTab, user.id);
@@ -108,9 +127,32 @@ export default function HomeScreen() {
     [activeTab, user]
   );
 
+  useEffect(() => { load(); }, [load]);
+
+  // Realtime new-post subscription
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!user) return;
+
+    const channel = supabase
+      .channel("public:posts:feed")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "posts" },
+        async (payload) => {
+          const newPost = await fetchSinglePost(payload.new.id as string, user.id);
+          if (newPost) {
+            setPosts((prev) => {
+              if (prev.some((p) => p.id === newPost.id)) return prev;
+              return [newPost, ...prev];
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    channelRef.current = channel;
+    return () => { supabase.removeChannel(channel); };
+  }, [user]);
 
   const handleLikeToggle = useCallback((postId: string, liked: boolean) => {
     setPosts((prev) =>
@@ -132,7 +174,7 @@ export default function HomeScreen() {
           Vibe <Text style={{ color: colors.primary }}>⚡</Text>
         </Text>
 
-        <View style={[styles.pillRow]}>
+        <View style={styles.pillRow}>
           {(["all", "following"] as Tab[]).map((t) => (
             <TouchableOpacity
               key={t}
@@ -169,10 +211,7 @@ export default function HomeScreen() {
             <Feather name="bell" size={22} color={colors.foreground} />
             {unreadCount > 0 && <View style={[styles.bellDot, { backgroundColor: colors.destructive }]} />}
           </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => router.push("/(tabs)/profile")}
-            activeOpacity={0.8}
-          >
+          <TouchableOpacity onPress={() => router.push("/(tabs)/profile")} activeOpacity={0.8}>
             {profile?.avatar_url ? (
               <Image source={{ uri: profile.avatar_url }} style={styles.headerAvatar} />
             ) : (
@@ -186,30 +225,23 @@ export default function HomeScreen() {
 
       {loading ? (
         <View>
-          {[1, 2, 3, 4].map((i) => (
-            <PostSkeleton key={i} />
-          ))}
+          {[1, 2, 3, 4].map((i) => <PostSkeleton key={i} />)}
         </View>
       ) : (
         <FlatList
           data={posts}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <PostCard post={item} onLikeToggle={handleLikeToggle} />
-          )}
+          renderItem={({ item }) => <PostCard post={item} onLikeToggle={handleLikeToggle} />}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                load(true);
-              }}
+              onRefresh={() => { setRefreshing(true); load(true); }}
               tintColor={colors.primary}
             />
           }
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text style={[styles.emptyIcon]}>✦</Text>
+              <Text style={styles.emptyIcon}>✦</Text>
               <Text style={[styles.emptyTitle, { color: colors.foreground, fontFamily: "DMSans_600SemiBold" }]}>
                 {activeTab === "following" ? "Follow people to see their posts" : "No posts yet"}
               </Text>
@@ -252,14 +284,7 @@ const styles = StyleSheet.create({
   pillText: { fontSize: 13 },
   headerRight: { flexDirection: "row", alignItems: "center", gap: 12 },
   headerBtn: { position: "relative" },
-  bellDot: {
-    position: "absolute",
-    top: -1,
-    right: -2,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
+  bellDot: { position: "absolute", top: -1, right: -2, width: 8, height: 8, borderRadius: 4 },
   headerAvatar: { width: 30, height: 30, borderRadius: 15 },
   headerAvatarPlaceholder: {
     width: 30,
@@ -270,7 +295,7 @@ const styles = StyleSheet.create({
   },
   empty: { alignItems: "center", gap: 8, padding: 40 },
   emptyContainer: { flexGrow: 1, justifyContent: "center" },
-  emptyIcon: { fontSize: 32, color: "#7c5cfc" },
+  emptyIcon: { fontSize: 32, color: "#3b82f6" },
   emptyTitle: { fontSize: 16, textAlign: "center" },
   emptyText: { fontSize: 14, textAlign: "center" },
   fab: {
@@ -281,7 +306,7 @@ const styles = StyleSheet.create({
     borderRadius: 26,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#7c5cfc",
+    shadowColor: "#3b82f6",
     shadowOpacity: 0.4,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },

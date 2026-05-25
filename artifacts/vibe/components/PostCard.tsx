@@ -8,7 +8,6 @@ import {
   Animated,
   ScrollView,
   Dimensions,
-  Platform,
 } from "react-native";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -44,6 +43,26 @@ function parseMediaUrls(mediaUrl: string | null): string[] {
   return mediaUrl.split(",").map((u) => u.trim()).filter(Boolean);
 }
 
+function MediaImage({ uri }: { uri: string }) {
+  const [failed, setFailed] = useState(false);
+  const colors = useColors();
+  if (failed) {
+    return (
+      <View style={[styles.singleMedia, { backgroundColor: colors.card2, alignItems: "center", justifyContent: "center" }]}>
+        <Feather name="image" size={28} color={colors.mutedForeground} />
+      </View>
+    );
+  }
+  return (
+    <Image
+      source={{ uri }}
+      style={styles.singleMedia}
+      resizeMode="cover"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 export function PostCard({ post, onLikeToggle }: Props) {
   const colors = useColors();
   const router = useRouter();
@@ -59,18 +78,10 @@ export function PostCard({ post, onLikeToggle }: Props) {
     heartScale.setValue(0.3);
     heartOpacity.setValue(1);
     Animated.parallel([
-      Animated.spring(heartScale, {
-        toValue: 1.2,
-        useNativeDriver: true,
-        friction: 4,
-      }),
+      Animated.spring(heartScale, { toValue: 1.2, useNativeDriver: true, friction: 4 }),
       Animated.sequence([
         Animated.delay(400),
-        Animated.timing(heartOpacity, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
+        Animated.timing(heartOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
       ]),
     ]).start();
   };
@@ -91,11 +102,7 @@ export function PostCard({ post, onLikeToggle }: Props) {
     if (!user) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (post.is_liked) {
-      await supabase
-        .from("likes")
-        .delete()
-        .eq("post_id", post.id)
-        .eq("user_id", user.id);
+      await supabase.from("likes").delete().eq("post_id", post.id).eq("user_id", user.id);
     } else {
       await supabase.from("likes").insert({ post_id: post.id, user_id: user.id });
     }
@@ -123,7 +130,11 @@ export function PostCard({ post, onLikeToggle }: Props) {
       <View style={styles.topRow}>
         <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.8} style={styles.profileRow}>
           {post.author?.avatar_url ? (
-            <Image source={{ uri: post.author.avatar_url }} style={styles.avatar} />
+            <Image
+              source={{ uri: post.author.avatar_url }}
+              style={styles.avatar}
+              onError={() => {}}
+            />
           ) : (
             <View style={[styles.avatarPlaceholder, { backgroundColor: colors.secondary }]}>
               <Ionicons name="person" size={16} color={colors.mutedForeground} />
@@ -143,11 +154,7 @@ export function PostCard({ post, onLikeToggle }: Props) {
 
       {mediaUrls.length === 1 && (
         <TouchableOpacity onPress={handlePress} activeOpacity={0.95}>
-          <Image
-            source={{ uri: mediaUrls[0] }}
-            style={styles.singleMedia}
-            resizeMode="cover"
-          />
+          <MediaImage uri={mediaUrls[0]} />
         </TouchableOpacity>
       )}
 
@@ -162,8 +169,9 @@ export function PostCard({ post, onLikeToggle }: Props) {
             <Image
               key={i}
               source={{ uri: url }}
-              style={[styles.carouselImage]}
+              style={styles.carouselImage}
               resizeMode="cover"
+              onError={() => {}}
             />
           ))}
         </ScrollView>
@@ -174,17 +182,25 @@ export function PostCard({ post, onLikeToggle }: Props) {
           <Ionicons
             name={post.is_liked ? "heart" : "heart-outline"}
             size={20}
-            color={post.is_liked ? colors.primary : colors.mutedForeground}
+            color={post.is_liked ? colors.accentGreen : colors.mutedForeground}
           />
           {(post.likes_count ?? 0) > 0 && (
-            <Text style={[styles.actionCount, { color: colors.mutedForeground, fontFamily: "DMSans_500Medium" }]}>
+            <Text
+              style={[
+                styles.actionCount,
+                {
+                  color: post.is_liked ? colors.accentGreen : colors.mutedForeground,
+                  fontFamily: "DMSans_500Medium",
+                },
+              ]}
+            >
               {post.likes_count}
             </Text>
           )}
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.action} onPress={handlePress} activeOpacity={0.7}>
-          <Feather name="message-circle" size={19} color={colors.mutedForeground} />
+          <Feather name="message-circle" size={19} color={colors.primary} />
           {(post.comments_count ?? 0) > 0 && (
             <Text style={[styles.actionCount, { color: colors.mutedForeground, fontFamily: "DMSans_500Medium" }]}>
               {post.comments_count}
@@ -199,12 +215,9 @@ export function PostCard({ post, onLikeToggle }: Props) {
 
       <Animated.View
         pointerEvents="none"
-        style={[
-          styles.heartOverlay,
-          { opacity: heartOpacity, transform: [{ scale: heartScale }] },
-        ]}
+        style={[styles.heartOverlay, { opacity: heartOpacity, transform: [{ scale: heartScale }] }]}
       >
-        <Ionicons name="heart" size={80} color="#fff" />
+        <Ionicons name="heart" size={80} color={colors.accentGreen} />
       </Animated.View>
     </TouchableOpacity>
   );
@@ -217,16 +230,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 10,
   },
-  topRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  profileRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
+  topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  profileRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   avatar: { width: 32, height: 32, borderRadius: 16 },
   avatarPlaceholder: {
     width: 32,
@@ -236,34 +241,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   time: { fontSize: 12 },
-  body: {
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  singleMedia: {
-    width: "100%",
-    height: 300,
-    marginTop: 2,
-  },
-  carousel: {
-    width: SCREEN_WIDTH - 32,
-    height: 260,
-    marginTop: 2,
-  },
-  carouselImage: {
-    width: SCREEN_WIDTH - 32,
-    height: 260,
-  },
-  actions: {
-    flexDirection: "row",
-    gap: 22,
-    marginTop: 2,
-  },
-  action: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
+  body: { fontSize: 15, lineHeight: 22 },
+  singleMedia: { width: "100%", height: 300, marginTop: 2 },
+  carousel: { width: SCREEN_WIDTH - 32, height: 260, marginTop: 2 },
+  carouselImage: { width: SCREEN_WIDTH - 32, height: 260 },
+  actions: { flexDirection: "row", gap: 22, marginTop: 2 },
+  action: { flexDirection: "row", alignItems: "center", gap: 5 },
   actionCount: { fontSize: 13 },
   heartOverlay: {
     position: "absolute",

@@ -39,7 +39,7 @@ export default function TabLayout() {
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: "#555555",
+        tabBarInactiveTintColor: "#52525b",
         tabBarShowLabel: false,
         tabBarStyle: {
           position: "absolute",
@@ -107,7 +107,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#ff3b30",
+    backgroundColor: "#ef4444",
   },
   createBtn: {
     width: 44,
