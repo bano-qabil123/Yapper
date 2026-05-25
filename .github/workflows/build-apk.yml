@@ -16,7 +16,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
       
       - name: Setup Expo
         uses: expo/expo-github-action@v8
@@ -32,3 +32,4 @@ jobs:
         run: |
           npx eas build --platform android --profile preview --non-interactive
           echo "✅ Build started! Download APK from https://expo.dev"
+          
