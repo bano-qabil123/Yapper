@@ -11,13 +11,12 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 18
-          cache: 'npm'
       
       - name: Setup Expo
         uses: expo/expo-github-action@v8
@@ -27,11 +26,9 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
       
       - name: Install dependencies
-        run: npm install
+        run: npm ci
       
-      - name: Build APK
-        run: npx eas build --platform android --profile preview --non-interactive --no-wait
-      
-      - name: Wait for build to complete
+      - name: Build APK on EAS
         run: |
-          echo "Build started! Check https://expo.dev for download link"
+          npx eas build --platform android --profile preview --non-interactive
+          echo "✅ Build started! Download APK from https://expo.dev"
