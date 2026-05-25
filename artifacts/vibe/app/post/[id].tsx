@@ -35,7 +35,7 @@ export default function PostDetailScreen() {
   const load = useCallback(async () => {
     if (!id || !user) return;
     const [{ data: postData }, { data: commentData }] = await Promise.all([
-      supabase.from("posts").select("*, profiles(*)").eq("id", id).single(),
+      supabase.from("posts").select("*, author:profiles!posts_user_id_fkey(*)").eq("id", id).single(),
       supabase
         .from("comments")
         .select("*, profiles(*)")

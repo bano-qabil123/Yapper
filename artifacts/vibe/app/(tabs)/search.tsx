@@ -98,7 +98,7 @@ export default function SearchScreen() {
       const [{ data: postData }, { data: userData }] = await Promise.all([
         supabase
           .from("posts")
-          .select("*, profiles(id, username, display_name, avatar_url, bio, verified)")
+          .select("*, author:profiles!posts_user_id_fkey(id, username, display_name, avatar_url, bio, verified)")
           .ilike("content", `%${trimmed}%`)
           .order("created_at", { ascending: false })
           .limit(20),

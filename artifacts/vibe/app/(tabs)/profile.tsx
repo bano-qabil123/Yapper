@@ -28,7 +28,7 @@ const GRID_ITEM_SIZE = (SCREEN_WIDTH - 2) / 3;
 async function fetchUserPosts(userId: string): Promise<Post[]> {
   const { data, error } = await supabase
     .from("posts")
-    .select("*, profiles(id, username, display_name, avatar_url, bio, verified)")
+    .select("*, author:profiles!posts_user_id_fkey(id, username, display_name, avatar_url, bio, verified)")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
   if (error) { console.error("[Profile] posts error:", error.message); return []; }
@@ -58,7 +58,7 @@ async function fetchUserPosts(userId: string): Promise<Post[]> {
 async function fetchLikedPosts(userId: string): Promise<Post[]> {
   const { data, error } = await supabase
     .from("likes")
-    .select("posts(*, profiles(id, username, display_name, avatar_url, bio, verified))")
+    .select("posts(*, author:profiles!posts_user_id_fkey(id, username, display_name, avatar_url, bio, verified))")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
   if (error) { console.error("[Profile] likes error:", error.message); return []; }

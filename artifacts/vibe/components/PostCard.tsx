@@ -107,10 +107,10 @@ export function PostCard({ post, onLikeToggle }: Props) {
   };
 
   const handleProfilePress = () => {
-    if (post.profiles?.id === user?.id) {
+    if (post.author?.id === user?.id) {
       router.push("/(tabs)/profile");
     } else {
-      router.push({ pathname: "/user/[id]", params: { id: post.profiles?.id ?? "" } });
+      router.push({ pathname: "/user/[id]", params: { id: post.author?.id ?? "" } });
     }
   };
 
@@ -122,16 +122,16 @@ export function PostCard({ post, onLikeToggle }: Props) {
     >
       <View style={styles.topRow}>
         <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.8} style={styles.profileRow}>
-          {post.profiles?.avatar_url ? (
-            <Image source={{ uri: post.profiles.avatar_url }} style={styles.avatar} />
+          {post.author?.avatar_url ? (
+            <Image source={{ uri: post.author.avatar_url }} style={styles.avatar} />
           ) : (
             <View style={[styles.avatarPlaceholder, { backgroundColor: colors.secondary }]}>
               <Ionicons name="person" size={16} color={colors.mutedForeground} />
             </View>
           )}
           <UserBadge
-            username={post.profiles?.username ?? "unknown"}
-            verified={post.profiles?.verified ?? false}
+            username={post.author?.username ?? "unknown"}
+            verified={post.author?.verified ?? false}
           />
         </TouchableOpacity>
         <Text style={[styles.time, { color: colors.mutedForeground, fontFamily: "DMSans_400Regular" }]}>

@@ -27,7 +27,7 @@ export type Post = {
   content: string;
   media_url: string | null;
   created_at: string;
-  profiles?: Profile;
+  author?: Profile;
   likes_count?: number;
   comments_count?: number;
   is_liked?: boolean;

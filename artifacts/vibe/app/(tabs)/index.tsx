@@ -24,7 +24,7 @@ type Tab = "all" | "following";
 async function fetchPosts(tab: Tab, userId: string): Promise<Post[]> {
   let query = supabase
     .from("posts")
-    .select("*, profiles(id, username, display_name, avatar_url, bio, verified)")
+    .select("*, author:profiles!posts_user_id_fkey(id, username, display_name, avatar_url, bio, verified)")
     .order("created_at", { ascending: false })
     .limit(40);
 

@@ -48,7 +48,7 @@ export default function UserProfileScreen() {
         supabase.from("profiles").select("*").eq("id", id).single(),
         supabase
           .from("posts")
-          .select("*, profiles(*)")
+          .select("*, author:profiles!posts_user_id_fkey(*)")
           .eq("user_id", id)
           .order("created_at", { ascending: false }),
         supabase.from("followers").select("*", { count: "exact", head: true }).eq("target_user_id", id),

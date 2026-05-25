@@ -34,7 +34,11 @@ export default function LoginScreen() {
     setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     setLoading(false);
-    if (error) Alert.alert("Login failed", error.message);
+    if (error) {
+      Alert.alert("Login failed", error.message);
+    } else {
+      router.replace("/(tabs)");
+    }
   };
 
   const handleForgotPassword = async () => {
@@ -59,7 +63,6 @@ export default function LoginScreen() {
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Logo */}
         <View style={styles.logoSection}>
           <View style={[styles.logoCircle, { backgroundColor: colors.primary }]}>
             <Text style={styles.logoEmoji}>⚡</Text>
@@ -72,7 +75,6 @@ export default function LoginScreen() {
           </Text>
         </View>
 
-        {/* Form */}
         <View style={styles.form}>
           <TextInput
             style={[
